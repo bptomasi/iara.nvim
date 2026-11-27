@@ -1557,7 +1557,7 @@ Commands `:IaraStructuredPath`, `:IaraStructuredCopy`,
 `:IaraStructuredSearch`, `:IaraStructuredBreadcrumb`,
 `:IaraStructuredRetry`; setting
 `features.structured.breadcrumb` (default on). Normal-mode mappings:
-`Space ys` key search (YAML keeps yaml-revealer's search), `Space yc`
+`Space ys` key search, `Space yc`
 copy path, `Space yp` show path, `Space yt` toggle breadcrumb. Copy
 refuses incomplete, ambiguous, source-only, or too-long paths with the
 reason and offers `file:line:col` instead. After a watchdog the
@@ -1572,7 +1572,10 @@ handlers on any eligibility state other than "eligible".
 `resume(bufnr)`, `search_keys()`, and `plugin_handlers(bufnr)`. A buffer
 suspended for being conservative stays suspended after it becomes
 eligible until `:IaraYamlResume`, which refuses while still ineligible.
-D4 routes YAML buffers through `yaml_legacy`.
+YAML search uses the pinned Tree-sitter parser in an eligible buffer.
+The prompt accepts a key name or a dotted path, including zero-based
+sequence indexes and double-quoted path components. Unmatched paths
+leave the cursor in place and report a notice.
 
 ## 12. Agents
 

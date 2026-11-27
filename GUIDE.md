@@ -346,8 +346,8 @@ replaces the start screen); selected files also become buffers. Only
 `Ctrl-q` makes a quickfix list.
 
 The list and the preview are two panes of equal size, side by side on
-editors at least 120 columns wide and stacked on narrower ones. The key
-search of structured data (`Space ys`) has the same layout and modes.
+editors at least 120 columns wide and stacked on narrower ones. JSON key
+search (`Space ys`) has the same layout and modes.
 
 Chained filters narrow step by step. For example, `Space ff`, type
 `test`, press `Ctrl-g`, and type `useEffect`: the title reads
@@ -522,6 +522,11 @@ for the configured backend, and `timeout_ms` sets its deadline
 | `Space yc` | `:IaraStructuredCopy` | Copy the path |
 | `Space yt` | `:IaraStructuredBreadcrumb` | Toggle the JSON breadcrumb |
 | | `:IaraYamlResume` | Resume yaml-revealer after a large file |
+
+In YAML, type a key name or a path at the `Space ys` prompt and press
+`Enter`. For example, `server.http.port` selects a nested key and
+`items[0].name` selects a key in the first list item. Use quotes for a
+component containing a dot, as in `config."app.port"`.
 
 ### Editing, files, Git, and LSP
 

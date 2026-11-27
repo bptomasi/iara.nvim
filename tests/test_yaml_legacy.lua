@@ -158,6 +158,45 @@ T["Space ys jumps to a dotted key path"] = function()
   eq(editor:lua(BREADCRUMB), "  → server.http.port")
 end
 
+T["Space ys jumps through sequence indexes and mixed indentation"] = function()
+  edit("config.yaml", YAML .. "mixed:\n    child:\n      leaf: example\n")
+  eq(wait_state("active"), true)
+  editor:input(" ysitems[1].name<CR>")
+  eq(editor:wait("return vim.fn.line('.') == 7"), true)
+  editor:input(" ysmixed.child.leaf<CR>")
+  eq(editor:wait("return vim.fn.line('.') == 10"), true)
+end
+
+T["Space ys finds exact names and quoted keys in flow maps"] = function()
+  edit(
+    "config.yml",
+    [[
+leaf: top
+config: { "app.port": 8080, nested: [{ leaf: inside }] }
+]]
+  )
+  eq(wait_state("active"), true)
+  editor:input([[ ysconfig."app.port"<CR>]])
+  eq(
+    editor:wait("return vim.fn.line('.') == 2 and vim.fn.col('.') == 11"),
+    true
+  )
+  editor:input(" ysconfig.nested[0].leaf<CR>")
+  eq(editor:wait("return vim.fn.col('.') == 40"), true)
+  editor:input(" ysleaf<CR>")
+  eq(editor:wait("return vim.fn.line('.') == 1"), true)
+end
+
+T["Space ys leaves the cursor on a missing path"] = function()
+  edit("config.yaml", YAML .. "staging:\n  http:\n    host: staged\n")
+  eq(wait_state("active"), true)
+  move_to(2)
+  editor:input(" ysstaging.http.port<CR>")
+  eq(editor:wait("return #_G.notes == 1"), true)
+  match(notes()[1], "YAML key not found: staging%.http%.port")
+  eq(editor:lua("return vim.fn.line('.')"), 2)
+end
+
 T["Space ys ignores an empty search silently"] = function()
   edit("config.yaml", YAML)
   eq(wait_state("active"), true)

@@ -1,5 +1,4 @@
--- yaml-revealer: the current key path as virtual text and `Space ys` key
--- search in YAML buffers, configured as in the previous NvChad setup.
+-- yaml-revealer shows the current YAML key path as virtual text.
 -- iara.features.structured.yaml_legacy owns its handlers, mapping, and
 -- namespace, and suspends them in conservative buffers.
 return {

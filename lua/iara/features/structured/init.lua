@@ -4,9 +4,9 @@
 --- JSON buffers get the breadcrumb, show and copy path, key search, and
 --- jumps to recorded locations (iara.features.structured.ui on top of
 --- the JSON extractor). YAML buffers keep yaml-revealer through
---- iara.features.structured.yaml_legacy (task D1): `Space ys` routes to
---- its key search, and show or copy explain where YAML paths live until
---- a YAML adapter exists. Explicit actions refuse with a visible reason
+--- iara.features.structured.yaml_legacy for the breadcrumb. `Space ys`
+--- prompts for a YAML key or path and locates it from the syntax tree.
+--- Explicit actions refuse with a visible reason
 --- in conservative buffers and never fall back to an unbounded scan.
 ---
 --- Mappings (normal mode, under the `Space y` group): `ys` key search,
@@ -238,7 +238,7 @@ local function on_index(bufnr, result)
 end
 
 ---Key search with preview: JSON through the bounded index and a Snacks
----picker; YAML through yaml-revealer's `Space ys` prompt.
+---picker; YAML through a prompt for a key name or dotted path.
 function M.search_keys()
   local action = "search keys"
   if unsupported(action) then

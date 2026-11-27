@@ -186,8 +186,8 @@ local function search_refusal(entry)
   end
 end
 
----Prompt for a separator-joined key path and jump to it, as `Space ys`
----did in NvChad. Refused, with the reason shown, unless active.
+---Prompt for a YAML key name or path and jump to its source location.
+---Refused, with the reason shown, unless active.
 ---@param bufnr integer? 0 or nil for the current buffer.
 function M.search_keys(bufnr)
   bufnr = (bufnr == nil or bufnr == 0) and api.nvim_get_current_buf() or bufnr
@@ -197,11 +197,20 @@ function M.search_keys(bufnr)
     notify(refusal, vim.log.levels.WARN)
     return
   end
-  local ok, err = pcall(vim.fn.SearchYamlKey)
-  -- E684: the plugin indexes an empty input; cancelling is not an error.
-  if not ok and not tostring(err):match("E684") then
-    notify(tostring(err), vim.log.levels.ERROR)
+  local query = vim.trim(vim.fn.input({
+    prompt = "Search for a YAML key: ",
+    cancelreturn = "",
+  }))
+  if query == "" then
+    return
   end
+  require("iara.features.structured.yaml_search").jump(
+    bufnr,
+    query,
+    function(message)
+      notify(message, vim.log.levels.WARN)
+    end
+  )
 end
 
 local function map_search(bufnr)
