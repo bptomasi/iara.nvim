@@ -33,7 +33,6 @@ M.PREFIX = "  → "
 M.HIGHLIGHT = "IaraBreadcrumb"
 -- ARCH, Structured paths: preview of 20 lines and 8 KiB.
 M.PREVIEW_LINES = 20
-M.PREVIEW_BYTES = 8 * 1024
 -- The target line gets a byte window around the key; the other 19 lines
 -- share the rest of the 8 KiB budget.
 local TARGET_LINE_BYTES = 2048

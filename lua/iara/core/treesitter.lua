@@ -38,12 +38,6 @@ M.FILETYPES = {
   typescriptreact = "tsx",
 }
 
----Parsers the baseline expects (markdown needs markdown_inline).
-M.PARSERS = { "lua", "json", "yaml", "vim", "query", "markdown" }
-
----Where `scripts/parsers.sh` installs pinned parsers for development.
-M.PARSER_RUNTIME = require("iara.core.parsers").DEV_RUNTIME
-
 local did_setup = false
 
 ---Keep the pinned parser directories on 'runtimepath'. lazy.nvim resets

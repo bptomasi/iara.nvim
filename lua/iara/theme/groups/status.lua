@@ -51,20 +51,15 @@ local groups = {
   IaraStatusMark = { fg = "@tide", bg = BAR, bold = true },
   IaraStatusRoot = { fg = "@fg", bg = BAR },
   IaraStatusPosition = { fg = "@fg_strong", bg = BAR },
-  -- No longer drawn (V4 dropped the position glyph); kept while
-  -- `iara.theme` links it under foreign colorschemes.
-  IaraStatusPositionIcon = { fg = "@fg_strong", bg = BAR },
 
   -- Tab line: the current label joins the editor surface behind an
-  -- accent bar; the others sit on the crust fill. The current tab
-  -- number is an accent chip.
+  -- accent bar; the others sit on the crust fill.
   IaraTabFill = { bg = "@crust" },
   IaraTabActive = { fg = "@fg_strong", bg = "@base", bold = true },
   IaraTabActiveBar = { fg = "@accent", bg = "@base" },
   IaraTabInactive = { fg = "@muted", bg = "@crust" },
   IaraTabModified = { fg = "@accent", bg = "@base" },
   IaraTabModifiedInactive = { fg = "@warn", bg = "@crust" },
-  IaraTabNumber = { fg = "@on_accent", bg = "@accent", bold = true },
 
   -- Split winbars: the current window leads with an accent bar and
   -- names its file in the accent; other windows are muted.

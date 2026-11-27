@@ -16,7 +16,6 @@
 local M = {}
 
 M.COMMAND = "IaraMarkdownToggle"
-M.KEY = "<leader>mr"
 M.DESC = "Markdown render toggle"
 
 ---Modes that render; Insert mode shows raw text (see above).

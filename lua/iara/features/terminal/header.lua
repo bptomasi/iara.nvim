@@ -21,9 +21,6 @@ local M = {}
 ---Window variable that marks a window decorated as a panel.
 M.MARK = "iara_panel"
 
----Group of the panel surface; also the winbar fill.
-M.SURFACE = "IaraPanel"
-
 local SURFACE_HIGHLIGHT = table.concat({
   "Normal:IaraPanel",
   "NormalNC:IaraPanel",

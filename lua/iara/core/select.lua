@@ -23,7 +23,6 @@ M.MAX_WIDTH = 80
 M.HIGHLIGHTS = {
   IaraSelectKey = "Special",
   IaraSelectText = "NormalFloat",
-  IaraSelectDetail = "Comment",
 }
 
 local FOOTER = { { "⏎", "choose" }, { "1-9", "pick" }, { "q", "cancel" } }

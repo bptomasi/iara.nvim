@@ -86,5 +86,4 @@ return {
   -- The vim.ui.select presenter (iara.core.select).
   IaraSelectKey = { fg = "@accent_row", bold = true },
   IaraSelectText = { fg = "@fg" },
-  IaraSelectDetail = { fg = "@muted" },
 }

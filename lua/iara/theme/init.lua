@@ -212,13 +212,11 @@ end
 -- them: neutral links, kept only where the colorscheme defines nothing.
 local FALLBACK_LINKS = {
   IaraBreadcrumb = "Comment",
-  IaraBreadcrumbSeparator = "Delimiter",
   IaraTabFill = "TabLineFill",
   IaraTabActive = "TabLineSel",
   IaraTabInactive = "TabLine",
   IaraTabModified = "TabLineSel",
   IaraTabModifiedInactive = "TabLine",
-  IaraTabNumber = "TabLineSel",
   IaraStartText = "Comment",
   IaraStartIcon = "Special",
   IaraStartAction = "Normal",
@@ -252,7 +250,6 @@ for _, name in ipairs({
   "Terminal",
   "Agent",
   "RootIcon",
-  "PositionIcon",
   "ModeNormal",
   "ModeInsert",
   "ModeVisual",

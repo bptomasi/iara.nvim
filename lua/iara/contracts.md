@@ -2076,7 +2076,6 @@ Press `y` to copy the answer.
   (never a tab page's last), so the screen never stays as a split.
   `buffer()` returns it while it exists.
 - `iara.core.treesitter` (F6): `FILETYPES` (filetype -> language),
-  `PARSERS`, `PARSER_RUNTIME` (development parser directory),
   `setup()` (puts `iara.core.parsers.runtime_dirs()` on 'runtimepath'
   and gates highlighting on FileType and `IaraEligibilityChanged`),
   `update(bufnr) -> active, reason?` (reasons "invalid", "ineligible",
@@ -2200,8 +2199,8 @@ Press `y` to copy the answer.
   the
   role groups `Iara{Accent,AccentSoft,OnAccent,Tide,TideSoft,Muted,
   Subtle,Faint,Border,BorderFocus,Mantle,Crust,Raised,Overlay}`.
-  Iara-owned groups: `IaraBreadcrumb`, `IaraBreadcrumbSeparator` (for
-  D4's breadcrumb), `IaraStatusWarn`, `IaraStatusConflict`,
+  Iara-owned groups: `IaraBreadcrumb` (for D4's breadcrumb),
+  `IaraStatusWarn`, `IaraStatusConflict`,
   `IaraStatusRoot`, `IaraStatusSafe` (statusline parts),
   `IaraStatusTerminal`, `IaraStatusAgent`, `IaraStatusRunning`,
   `IaraStatusExited` (terminal status lines, UX2); UX3 adds
@@ -2209,19 +2208,19 @@ Press `y` to copy the answer.
   Confirm}`, `IaraStatusFile`, `IaraStatusModified`, `IaraStatusMuted`,
   `IaraStatusGit{Added,Changed,Removed}`,
   `IaraStatusDiag{Error,Warn,Info,Hint}`, `IaraStatusLsp`,
-  `IaraStatusRootIcon`, `IaraStatusPositionIcon` (V4: no longer drawn),
-  `IaraStatusPosition`, `IaraTab{Fill,Active,Inactive,Modified,
-  ModifiedInactive,Number}`, and `IaraStart{Logo,Text,Icon,Action,Key,
-  Footer}`; V6 adds `IaraStart{WaveTide,WaveMid,WaveAccent,Cursor,Bar,
+  `IaraStatusRootIcon`, `IaraStatusPosition`,
+  `IaraTab{Fill,Active,Inactive,Modified,ModifiedInactive}`, and
+  `IaraStart{Text,Icon,Action,Key,Footer}`;
+  V6 adds `IaraStart{WaveTide,WaveMid,WaveFoam,Cursor,Bar,
   Section,Rule,FileIcon,File,Mark}`; V3 adds `IaraFloat{TitleFocus,
   TitleCap,TitleFocusCap,FooterKey}` (`groups/floats.lua`, fallback
-  links in `iara.core.float`); V4 adds `IaraStatusMode<Mode>Cap`,
-  `IaraStatusCap`, `IaraStatusMark`, `IaraTabActiveBar`, and
+  links in `iara.core.float`); V4 adds `IaraStatusMark`,
+  `IaraTabActiveBar`, and
   `IaraWinbar{Bar,Icon,Path,Name,Modified,Inactive}`; V10 adds
   `IaraSearch{TitleCap,CrumbCap,CountBusy,Selection,SelectionBar,
   SelectionGap,GroupCount}`, `IaraTheme{Mark,Type}`,
   `IaraThemeSwatch<Theme><n>` (defined by the theme picker), and
-  `IaraSelect{Key,Text,Detail}` (fallback links in their modules);
+  `IaraSelect{Key,Text}` (fallback links in their modules);
   V7 moves `IaraStatus{Terminal,Agent,Running,Exited}` onto roles
   (`mode_terminal`, `mode_visual`, `ok`, `error`) and adds `IaraPanel`
   (panel surface: `fg` on `mantle`) and
@@ -2276,7 +2275,7 @@ Press `y` to copy the answer.
   `VisualNOS` linked to `Visual`, `LspCodeLens`,
   `DiagnosticUnnecessary`, `GitSignsCurrentLineBlame`,
   `IaraBreadcrumb`, Mason's muted text, and ignored tree names
-  `muted`, `IaraBreadcrumbSeparator` `subtle`, Lazy and Mason headers
+  `muted`, Lazy and Mason headers
   rectangular accent blocks and their other colors state roles,
   `SnacksPicker{Prompt,Selected}` `accent`.
   Under a foreign
@@ -2326,7 +2325,7 @@ Press `y` to copy the answer.
   parsers, External tools.
 - `iara.features.markdown` (MD1): Obsidian-like rendering of Markdown
   through render-markdown.nvim (spec `plugins/render_markdown.lua`,
-  `ft = "markdown"`, `cmd` `COMMAND`, key `KEY` in Markdown buffers;
+  `ft = "markdown"`, `cmd` `COMMAND`, key `<leader>mr` in Markdown buffers;
   Neovim's bundled markdown and markdown_inline parsers).
   `setup()` (from the spec's `config`) runs the plugin's setup with
   `options()`, defines `:IaraMarkdownToggle` (`COMMAND`), and follows
@@ -2344,7 +2343,7 @@ Press `y` to copy the answer.
   eligible: conservative and unknown buffers show raw text),
   `apply(bufnr)` (switches an attached buffer to `wanted`),
   `attached(ctx)` (the plugin's `on.attach`), `toggle() -> enabled`
-  (the global switch for every attached buffer, `KEY` `<leader>mr`
+  (the global switch for every attached buffer, `<leader>mr`
   "Markdown render toggle", which-key group `<leader>m` "Markdown"),
   `enabled()`, `rendering(bufnr) -> boolean|nil` (nil before attach).
   `drop_conceal_lines() -> changed` (MD2): disables the `conceal_lines`

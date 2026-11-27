@@ -301,7 +301,6 @@ local MUTED_TEXT = {
   { "DiagnosticInfo", "base" },
   { "IaraStatusDiagInfo", "bg" },
   { "DiagnosticVirtualTextInfo", "bg" },
-  { "IaraTabNumber", "bg" },
   { "IaraSearchModeChip", "bg" },
   -- Accent titles, keys, and matches (the V2 gallery found 3.77:1).
   { "FloatTitle", "mantle" },

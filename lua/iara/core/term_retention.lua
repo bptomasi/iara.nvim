@@ -32,7 +32,6 @@ local NOT_SET_UP = "term_retention.setup() has not run"
 ---@class IaraRetentionState
 ---@field ok boolean
 ---@field reason string|nil
----@field original_id integer|nil
 ---@field original fun(ev: table): any
 ---@field wrapper_id integer|nil
 ---@field wrapper fun(ev: table): any
@@ -183,7 +182,6 @@ local function install(handler)
   end
   return {
     ok = true,
-    original_id = handler.id,
     original = original,
     wrapper_id = wrapper_id,
     wrapper = wrapper,

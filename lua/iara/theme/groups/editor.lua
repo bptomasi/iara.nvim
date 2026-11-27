@@ -108,5 +108,4 @@ return {
   -- The structured breadcrumb (D4): quiet like yaml-revealer's virtual
   -- text, but readable (its old link, Comment, was 2.3:1 in nord; V12).
   IaraBreadcrumb = { fg = "@muted" },
-  IaraBreadcrumbSeparator = { fg = "@subtle" },
 }

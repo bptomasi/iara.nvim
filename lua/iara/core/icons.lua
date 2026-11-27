@@ -14,7 +14,6 @@ M.FOLDER = "\u{f024b}"
 M.FOLDER_OPEN = "\u{f0770}"
 M.GIT_BRANCH = "\u{e725}"
 M.LSP = "\u{f085}" -- gears
-M.POSITION = "\u{e612}"
 M.TERMINAL = "\u{f489}"
 M.AGENT = "\u{f06a9}" -- robot
 M.WARNING = "\u{f071}"
