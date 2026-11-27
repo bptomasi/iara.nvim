@@ -553,8 +553,9 @@ component containing a dot, as in `config."app.port"`.
 | `Space D` / `Space ra` | | Type definition / rename (LSP) |
 
 Oil opens an editable directory buffer in the current window. Press
-`Enter` to open an entry or `-` to go up. Edit the listing and use
-`:write` to apply the changes. Deleted files go to the system trash.
+`Enter` on `..` or press `-` to go up. The parent entry is visible even
+when hidden files are off. Edit the listing and use `:write` to apply
+changes. Deleted files go to the system trash.
 
 Formatting is explicit only. It needs `stylua` and a `stylua.toml` or
 `.stylua.toml` between the file and the project root, or the absolute

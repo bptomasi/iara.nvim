@@ -9,5 +9,10 @@ return {
   opts = {
     default_file_explorer = false,
     delete_to_trash = true,
+    view_options = {
+      is_hidden_file = function(name)
+        return name ~= ".." and name:sub(1, 1) == "."
+      end,
+    },
   },
 }

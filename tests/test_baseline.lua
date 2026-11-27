@@ -72,6 +72,41 @@ local T = MiniTest.new_set({
   },
 })
 
+T["Oil keeps the parent entry visible with hidden files off"] = function()
+  local dir = helpers.temp_dir()
+  local subdir = dir .. "/nested"
+  vim.fn.mkdir(subdir, "p")
+  helpers.write_file(subdir .. "/visible.txt", "")
+  helpers.write_file(subdir .. "/.hidden", "")
+  editor = editor_fixture.start(env, dir)
+  edit(subdir .. "/visible.txt")
+  editor:input(" d")
+  eq(
+    editor:wait([[
+    return vim.bo.filetype == 'oil'
+      and table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+        :find('visible.txt', 1, true) ~= nil
+  ]]),
+    true
+  )
+  eq(
+    editor:lua([[
+    local oil = require('oil')
+    local names = {}
+    for line = 1, vim.api.nvim_buf_line_count(0) do
+      local entry = oil.get_entry_on_line(0, line)
+      names[line] = entry and entry.name
+    end
+    return names
+  ]]),
+    { "..", "visible.txt" }
+  )
+  editor:lua("vim.api.nvim_win_set_cursor(0, { 1, 0 })")
+  editor:input("<CR>")
+  local in_parent = "return require('oil').get_current_dir() == %q"
+  eq(editor:wait(in_parent:format(dir .. "/")), true)
+end
+
 T["the Tree-sitter installer offers the requested languages"] = function()
   editor = editor_fixture.start(env, helpers.temp_dir())
   eq(editor:lua("return vim.fn.exists(':TSInstall')"), 2)
