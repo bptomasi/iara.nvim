@@ -1,0 +1,7 @@
+# Comment before the root mapping.
+items:
+  - first # comment after an element
+  # comment between elements does not count
+  - second
+# comment between pairs
+after: true

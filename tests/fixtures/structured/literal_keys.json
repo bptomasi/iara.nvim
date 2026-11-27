@@ -1,0 +1,16 @@
+{
+  "server.port": 1,
+  "server": {"port": 2},
+  "[0]": "bracket key",
+  "a[1].b": "brackets and dots",
+  "": "empty key",
+  "say \"hi\"": "escaped quotes",
+  "back\\slash": "escaped backslash",
+  "slash\/escaped": "escaped solidus",
+  "café": "escaped e-acute",
+  "😀": "surrogate pair",
+  "tab\there": "escaped control",
+  "nul\u0000byte": "escaped NUL",
+  "日本語": {"キー": "multibyte prefix before the target"},
+  "nested": {"": {"": "empty keys at two levels"}}
+}

@@ -1,0 +1,6 @@
+[
+  {"id": 1, "name": "first"},
+  {"id": 2, "tags": ["a", "b"]},
+  [10, 20],
+  "scalar element"
+]

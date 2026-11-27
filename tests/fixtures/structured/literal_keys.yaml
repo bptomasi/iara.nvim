@@ -1,0 +1,19 @@
+"server.port": 1
+server:
+  port: 2
+"[0]": bracket key
+"a[1].b": brackets and dots
+"": empty double-quoted key
+'': empty single-quoted key, duplicate of the previous key
+'it''s': doubled single quote
+"say \"hi\"": escaped double quotes
+"back\\slash": escaped backslash
+"café": escaped e-acute
+"tab\there": escaped control
+"0": key zero, not index zero
+日本語:
+  キー: multibyte prefix before the target
+plain key with spaces: plain scalar key
+nested:
+  "":
+    "": empty keys at two levels

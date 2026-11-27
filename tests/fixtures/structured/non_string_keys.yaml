@@ -1,0 +1,16 @@
+null: null key
+~: tilde null key
+true: boolean key
+1: integer key
+1.5: float key
+"1": quoted string key
+? [complex, key]
+: complex sequence key
+? {a: 1}
+: complex mapping key
+!!str 2: explicitly tagged string key
+!custom tagged: custom tag key
+key: !custom tagged value
+child:
+  of_custom: !custom
+    nested: descendant of a custom-tagged value

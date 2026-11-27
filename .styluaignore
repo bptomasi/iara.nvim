@@ -1,0 +1,2 @@
+# Inputs for the quality checker tests; their layout is part of the test.
+tests/fixtures/quality/

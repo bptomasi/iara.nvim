@@ -1,0 +1,11 @@
+// Line comment before the root value.
+{
+  /* Block comment before a key. */
+  "items": [
+    "first", // comment after an element
+    /* comment between elements does not count */
+    "second"
+  ],
+  // comment between pairs
+  "after": true
+}

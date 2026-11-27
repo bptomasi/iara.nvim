@@ -1,0 +1,8 @@
+{
+  "lone \ud83d high": 1,
+  "lone \ude00 low": 2,
+  "bad \x41 escape": 3,
+  "raw	tab": 4,
+  "short \u12 escape": 5,
+  "valid": 6
+}

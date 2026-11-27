@@ -1,0 +1,17 @@
+# Downloaded development tools, caches, and private profiles
+/.tools/
+/lua/user.lua
+nvim.log
+
+# Local editor and operating system files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local tool configuration
+/.agents/
+/.aws/
+/.claude/
+/.codex/

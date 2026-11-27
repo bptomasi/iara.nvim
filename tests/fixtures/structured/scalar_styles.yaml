@@ -1,0 +1,16 @@
+? "multi
+  line key"
+: folded double-quoted explicit key
+? 'multi
+  line single'
+: folded single-quoted explicit key
+plain: |
+  literal block
+  value
+folded: >
+  folded block
+  value
+flow: {a: 1, "b.c": [x, {d: 2}]}
+block:
+  - [1, 2]
+  - {e: 3}

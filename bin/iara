@@ -1,0 +1,5 @@
+#!/bin/sh
+# Start Neovim with the Iara configuration. NVIM_APPNAME is set for the
+# child only, so `nvim` from the calling shell keeps its configuration.
+# Shells and agents started inside Iara inherit it, though.
+NVIM_APPNAME=iara exec nvim "$@"

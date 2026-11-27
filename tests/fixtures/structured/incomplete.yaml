@@ -1,0 +1,7 @@
+intact:
+  child: 1
+broken: "unterminated
+later:
+  key: [1, 2
+also_intact:
+  child: 2

@@ -1,0 +1,20 @@
+# Pinned Tree-sitter grammars that Neovim does not bundle.
+#
+# scripts/parsers.sh builds them for development (into .tools/), and
+# scripts/bootstrap.lua for an installation (into stdpath("data")); both
+# compile the grammar's src/parser.c and, when present, src/scanner.c
+# with the local C compiler. :checkhealth iara compares them to this file.
+#
+# Each entry starts with "parser <language>", followed by
+# "repo <owner/repository>" (GitHub), "commit <full hash>", and
+# "tag <release tag>" for reference. Lines starting with # are comments.
+
+parser json
+repo tree-sitter/tree-sitter-json
+commit ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24
+tag v0.24.8
+
+parser yaml
+repo tree-sitter-grammars/tree-sitter-yaml
+commit 7708026449bed86239b1cd5bce6e3c34dbca6415
+tag v0.7.2

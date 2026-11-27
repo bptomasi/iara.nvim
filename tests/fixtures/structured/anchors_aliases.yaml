@@ -1,0 +1,12 @@
+defaults: &defaults
+  adapter: postgres
+  host: localhost
+development:
+  <<: *defaults
+  database: dev
+test:
+  <<: *defaults
+  database: test
+copy: *defaults
+cycle: &cycle
+  self: *cycle

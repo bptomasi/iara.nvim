@@ -1,0 +1,11 @@
+name: first
+name: second
+a:
+  b: 1
+a:
+  b: 2
+unique:
+  a:
+    b: 3
+key: plain spelling
+"key": quoted spelling of the same key

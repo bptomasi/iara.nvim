@@ -1,0 +1,10 @@
+{
+  "name": "first",
+  "name": "second",
+  "a": {"b": 1},
+  "a": {"b": 2},
+  "unique": {"a": {"b": 3}},
+  "café": "literal e-acute",
+  "café": "same key as the previous one after decoding",
+  "é": "decomposed form, a different key"
+}

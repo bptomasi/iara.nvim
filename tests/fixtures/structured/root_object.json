@@ -1,0 +1,11 @@
+{
+  "server": {
+    "host": "localhost",
+    "port": 8080
+  },
+  "list": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, {"tenth": true}],
+  "0": "key zero, not index zero",
+  "empty_object": {},
+  "empty_array": [],
+  "nested": [[{"deep": null}]]
+}
