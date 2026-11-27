@@ -137,6 +137,29 @@ T["F7 in terminal input hides the panel and keeps the job"] = function()
   eq(state.current, editor)
 end
 
+local navigation = MiniTest.new_set({
+  parametrize = {
+    { "right", "<C-h>" },
+    { "top", "<C-j>" },
+    { "bottom", "<C-k>" },
+    { "left", "<C-l>" },
+  },
+})
+T["window navigation"] = navigation
+
+navigation["moves focus directly from terminal input"] = function(position, key)
+  run("edit(...)", helpers.temp_dir())
+  local editor = run("return vim.api.nvim_get_current_win()")
+  run("terminal.set_position(...); terminal.toggle_main()", position)
+  eq(wait_mode("t"), "t")
+  local panels = run("return panel_windows()")
+  child.type_keys(key)
+  eq(wait_mode("n"), "n")
+  eq(run("return vim.api.nvim_get_current_win()"), editor)
+  eq(run("return panel_windows()"), panels)
+  eq(run("return alive(registry.list()[1])"), true)
+end
+
 T["toggle hides a visible panel from another window"] = function()
   run("edit(...)", helpers.temp_dir())
   local editor = run("return vim.api.nvim_get_current_win()")
@@ -262,6 +285,9 @@ T["Esc and Ctrl+c reach the program; Ctrl+\\ Ctrl+n leaves input"] = function()
   child.type_keys("<C-c>")
   match(run("return wait_text(..., 'GOT_INT')", bufnr), "GOT_INT")
   eq(mode(), "t")
+  child.type_keys("<C-l>")
+  match(run("return wait_text(..., ' 0c')", bufnr), " 0c")
+  eq(mode(), "t")
   child.type_keys([[<C-\><C-n>]])
   eq(wait_mode("nt"), "nt")
   eq(run("return alive(registry.list()[1])"), true)
@@ -286,14 +312,15 @@ T["terminal input has no leader mappings"] = function()
     local lhs = {}
     local bufnr = vim.api.nvim_get_current_buf()
     for _, map in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "t")) do
-      table.insert(lhs, map.lhs)
+      table.insert(lhs, map.lhs:lower())
     end
     for _, map in ipairs(vim.api.nvim_get_keymap("t")) do
-      table.insert(lhs, map.lhs)
+      table.insert(lhs, map.lhs:lower())
     end
+    table.sort(lhs)
     return lhs
   ]])
-  eq(maps, { "<F7>" })
+  eq(maps, { "<c-h>", "<c-j>", "<c-k>", "<c-l>", "<f7>" })
 end
 
 T["entering a hidden terminal buffer does not start input"] = function()
@@ -433,19 +460,25 @@ T["hiding the only window keeps the tab and the job"] = function()
 end
 
 T["personal keymaps replace or remove the defaults"] = function()
-  start_with_keymaps({ ["n <F7>"] = false, ["t <F7>"] = false })
+  start_with_keymaps({
+    ["n <F7>"] = false,
+    ["t <F7>"] = false,
+    ["t <C-h>"] = false,
+  })
   run("edit(...)", helpers.temp_dir())
   local state = run([[
     terminal.toggle_main()
     return {
       normal = vim.fn.maparg("<F7>", "n"),
       leader = vim.fn.maparg("<leader>tt", "n", false, true).desc,
-      buffer = vim.api.nvim_buf_get_keymap(0, "t"),
+      f7 = vim.fn.maparg("<F7>", "t"),
+      left = vim.fn.maparg("<C-h>", "t"),
     }
   ]])
   eq(state.normal, "")
   eq(state.leader, "Toggle main terminal")
-  eq(state.buffer, {})
+  eq(state.f7, "")
+  eq(state.left, "")
 end
 
 -- T4: side panel and close on exit.
@@ -581,14 +614,28 @@ T["a shown panel moves to the configured side in a new tab"] = function()
   })
 end
 
-T["Ctrl+D in the shell closes the panel and disposes it"] = function()
+local eof = MiniTest.new_set({ parametrize = { { false }, { true } } })
+T["shell EOF"] = eof
+
+eof["Ctrl+D closes the panel and disposes it"] = function(switch_windows)
   run("edit(...)", helpers.temp_dir())
+  run([[
+    require("iara.core.keymaps").setup({})
+    terminal.set_position("right")
+  ]])
   local editor = run("return vim.api.nvim_get_current_win()")
   child.type_keys("<F7>")
   eq(wait_mode("t"), "t")
   local bufnr = run("return vim.api.nvim_get_current_buf()")
   run("wait_text(..., '%$')", bufnr)
-  child.type_keys("<C-d>")
+  if switch_windows then
+    child.type_keys("<C-h>")
+    eq(wait_mode("n"), "n")
+    eq(run("return vim.api.nvim_get_current_win()"), editor)
+    child.type_keys("<C-l><C-d>")
+  else
+    child.type_keys("<C-d>")
+  end
   local state = wait_disposed()
   eq(state, { records = 0, panels = 0, current = editor, buftype = "" })
   eq(wait_mode("n"), "n")

@@ -8,6 +8,25 @@
 --- See contracts.md, sections 3 and 13.
 local M = {}
 
+---Move like Ctrl-w, resuming input when the destination is a live panel.
+function M.move_window(direction, count)
+  local previous = vim.api.nvim_get_current_win()
+  vim.cmd.wincmd({ args = { direction }, count = count or 1 })
+  local moved = previous ~= vim.api.nvim_get_current_win()
+  if moved and vim.bo.buftype == "terminal" then
+    require("iara.features.terminal").resume_panel_input()
+  end
+end
+
+local function window_mapping(direction, name)
+  return {
+    function()
+      M.move_window(direction, vim.v.count1)
+    end,
+    desc = "Go to " .. name .. " window",
+  }
+end
+
 ---@class IaraKeymap
 ---@field [1] string|function Right-hand side.
 ---@field desc string?
@@ -17,10 +36,10 @@ M.DEFAULTS = {
   ["n <Esc>"] = { "<cmd>nohlsearch<CR>", desc = "Clear search highlight" },
   ["n ;"] = { ":", desc = "Enter command line" },
   ["n <C-s>"] = { "<cmd>write<CR>", desc = "Save file" },
-  ["n <C-h>"] = { "<C-w>h", desc = "Go to left window" },
-  ["n <C-j>"] = { "<C-w>j", desc = "Go to lower window" },
-  ["n <C-k>"] = { "<C-w>k", desc = "Go to upper window" },
-  ["n <C-l>"] = { "<C-w>l", desc = "Go to right window" },
+  ["n <C-h>"] = window_mapping("h", "left"),
+  ["n <C-j>"] = window_mapping("j", "lower"),
+  ["n <C-k>"] = window_mapping("k", "upper"),
+  ["n <C-l>"] = window_mapping("l", "right"),
   ["n <Tab>"] = { "<cmd>bnext<CR>", desc = "Next buffer" },
   ["n <S-Tab>"] = { "<cmd>bprevious<CR>", desc = "Previous buffer" },
   ["n <leader>x"] = { "<cmd>bdelete<CR>", desc = "Close buffer" },

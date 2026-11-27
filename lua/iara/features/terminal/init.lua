@@ -6,7 +6,8 @@
 --- belong to `panel`: shells show in the shell panel, agent sessions in
 --- the agent panel, each at its own position (UX2). Hiding never
 --- stops a job, and no action restarts one silently. Explicit show and
---- focus enter terminal input; ordinary buffer entry never does.
+--- focus, including directional shortcuts, enter terminal input.
+--- Ordinary buffer entry leaves the user in control of the mode.
 ---
 --- A shell (role main or shell) that exits for any reason closes its
 --- panel and is disposed at once, unless `features.terminal`
@@ -63,6 +64,20 @@ local function enter_input(win)
       vim.cmd.startinsert()
     end
   end)
+end
+
+---Directional navigation focused an open panel. Resume its running job.
+function M.resume_panel_input()
+  local win = vim.api.nvim_get_current_win()
+  if win ~= shell_panel:window() and win ~= panel.agent:window() then
+    return
+  end
+  local bufnr = vim.api.nvim_win_get_buf(win)
+  local record = record_for_buffer(bufnr)
+  if record and record.status == "running" then
+    -- Switch modes before the next queued key goes to Terminal-Normal.
+    vim.cmd.startinsert()
+  end
 end
 
 ---Show a record in the panel of its role and focus it; a live job gets

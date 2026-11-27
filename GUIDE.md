@@ -415,6 +415,7 @@ symlinks.
 | Key | Command | Action |
 | --- | --- | --- |
 | `F7` (normal and terminal) | `:IaraTermToggle` | Toggle main terminal |
+| `Ctrl-h/j/k/l` | | Move focus to the adjacent window |
 | `Space tt` | | Toggle main terminal |
 | | `:IaraTermFocus` | Show and focus it, never hide |
 | `Space tn` | `:IaraTermNew` | New terminal at the project root |
@@ -429,7 +430,10 @@ symlinks.
 | | `:IaraTermDispose` | Remove this exited terminal |
 
 `Esc` and `Ctrl-c` go to the program; `Ctrl-\ Ctrl-n` leaves terminal
-input as in plain Neovim.
+input as in plain Neovim. In Iara's terminal panels, `Ctrl-h/j/k/l` move
+focus directly from terminal input. Moving into a live panel with those
+shortcuts resumes terminal input. With no window in that direction, the
+key goes to the running program.
 
 Shells share one panel and agent sessions share another, so a shell at
 the bottom and Claude Code at the right can be visible together. Each
@@ -446,7 +450,7 @@ its state (`running`, `exited 1`) and the project, never the
 `term://...` buffer name; the tab line names terminal tabs the same
 way.
 
-When a shell exits (`exit`, `Ctrl-d`, or any error status), its
+When a shell exits (`exit`, `Ctrl-d` at an empty prompt, or an error), its
 panel closes and focus returns to the window you were editing. An agent
 session closes after a successful exit and keeps its transcript after a
 failure, so the error stays readable. To change this:

@@ -1,11 +1,10 @@
 --- Terminal mappings.
 ---
---- Normal mode gets F7 and the `Space t` group. Terminal input gets only
---- F7, and only in Iara-owned terminal buffers: a leader there would
---- capture ordinary application text, and Esc, Ctrl+c, and Ctrl+\ Ctrl+n
---- must reach the program or Neovim unchanged. A `config.keymaps` entry
---- for the same "<mode> <lhs>" (a replacement or `false`) wins over these
---- defaults; core keymaps (F6) applies it.
+--- Normal mode gets F7 and the `Space t` group. Iara-owned terminal
+--- buffers get F7 and directional window navigation during input.
+--- Leader keys, Esc, Ctrl+c, and Ctrl+\ Ctrl+n keep their native
+--- behavior. A `config.keymaps` entry for the same "<mode> <lhs>"
+--- (a replacement or `false`) wins over these defaults.
 local M = {}
 
 ---@class IaraTerminalMapping
@@ -71,8 +70,29 @@ M.TERMINAL = {
 ---@type table<string, any>
 local user_keymaps = {}
 
-local function user_owns(mapping)
-  return user_keymaps[mapping.mode .. " " .. mapping.lhs] ~= nil
+local function user_owns(mode, lhs)
+  return user_keymaps[mode .. " " .. lhs] ~= nil
+end
+
+local WINDOW_DIRECTIONS = { h = "left", j = "lower", k = "upper", l = "right" }
+
+local function map_window_navigation(bufnr, direction, name)
+  local lhs = ("<C-%s>"):format(direction)
+  if user_owns("t", lhs) then
+    return
+  end
+  vim.keymap.set("t", lhs, function()
+    local target = vim.fn.winnr(direction)
+    if target == 0 or target == vim.fn.winnr() then
+      return lhs
+    end
+    local move = [[<Cmd>lua require("iara.core.keymaps").move_window(%q)<CR>]]
+    return [[<C-\><C-n>]] .. move:format(direction)
+  end, {
+    buffer = bufnr,
+    desc = "Go to " .. name .. " window",
+    expr = true,
+  })
 end
 
 local function rhs(terminal, mapping)
@@ -87,7 +107,7 @@ end
 function M.setup(terminal, keymaps)
   user_keymaps = type(keymaps) == "table" and keymaps or {}
   for _, mapping in ipairs(M.NORMAL) do
-    if not user_owns(mapping) then
+    if not user_owns(mapping.mode, mapping.lhs) then
       vim.keymap.set(mapping.mode, mapping.lhs, rhs(terminal, mapping), {
         desc = mapping.desc,
       })
@@ -95,18 +115,23 @@ function M.setup(terminal, keymaps)
   end
 end
 
----Map F7 in terminal input of one owned terminal buffer.
+---Map controls in terminal input of one owned terminal buffer.
 ---@param terminal table The `iara.features.terminal` module.
 ---@param bufnr integer
 function M.map_buffer(terminal, bufnr)
   local mapping = M.TERMINAL
-  if user_owns(mapping) or not vim.api.nvim_buf_is_valid(bufnr) then
+  if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  vim.keymap.set(mapping.mode, mapping.lhs, rhs(terminal, mapping), {
-    buffer = bufnr,
-    desc = mapping.desc,
-  })
+  if not user_owns(mapping.mode, mapping.lhs) then
+    vim.keymap.set(mapping.mode, mapping.lhs, rhs(terminal, mapping), {
+      buffer = bufnr,
+      desc = mapping.desc,
+    })
+  end
+  for direction, name in pairs(WINDOW_DIRECTIONS) do
+    map_window_navigation(bufnr, direction, name)
+  end
 end
 
 return M
