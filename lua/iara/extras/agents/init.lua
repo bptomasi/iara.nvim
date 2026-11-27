@@ -324,8 +324,8 @@ local function picker_items(project_root)
   end
   local items = vim.list_extend(own, others)
   for _, name in ipairs(M.ORDER) do
-    local title = M.AGENTS[name].title
-    table.insert(items, { new = name, title = title, root = project_root })
+    local label = M.AGENTS[name].title
+    table.insert(items, { new = name, title = label, root = project_root })
   end
   return items
 end

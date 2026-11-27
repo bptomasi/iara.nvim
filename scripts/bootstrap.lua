@@ -234,10 +234,10 @@ end
 local function rollback(_, layout)
   local previous, recorded = activate.rollback(layout)
   local revision = recorded.config and recorded.config.revision
-  local source = type(revision) == "string" and revision or "unknown revision"
+  local label = type(revision) == "string" and revision or "unknown revision"
   local text = "rolled back to release %s (configuration %s);"
     .. " restart Iara to use it"
-  say(text:format(vim.fs.basename(previous), source))
+  say(text:format(vim.fs.basename(previous), label))
 end
 
 ---Repair must use the installed release's own bootstrap and locks: the

@@ -33,7 +33,7 @@ local KINDS = { dir = true, dir_here = true, dir_up = true, entry = true }
 -- Path lists are immutable. Drop their indexes when their owners release them.
 local indexes = setmetatable({}, { __mode = "k" })
 
-local function index(result)
+local function directory_index(result)
   local paths = result.paths
   local complete = result.state == "complete"
   local tree = indexes[paths]
@@ -114,7 +114,7 @@ function Step:load()
       self.failure = result.error and result.error.message or "error"
       self.tree = dirs.index({}, true)
     else
-      self.tree = index(result)
+      self.tree = directory_index(result)
     end
     if not self.tree.dirs[self.from] then
       self.from = ""

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      IARA_TEST_JOBS: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl less ripgrep unzip
+      - name: Install Neovim 0.12.3
+        env:
+          NVIM_SHA256: >-
+            c441b547142860bf01bcce39e36cbed185c41112813e15443b16e5237750724d
+        run: |
+          cd "$RUNNER_TEMP"
+          archive=nvim-linux-x86_64.tar.gz
+          base=https://github.com/neovim/neovim/releases/download/v0.12.3
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$archive" "$base/$archive"
+          printf '%s  %s\n' "$NVIM_SHA256" "$archive" | sha256sum --check
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: Install pinned development tools
+        run: make tools
+      - name: Check formatting, lint, and tests
+        run: make check

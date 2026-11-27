@@ -68,4 +68,5 @@ make dev
 ```
 
 `make dev` uses an isolated profile. See the
-[Make targets](GUIDE.md#make-targets) and [third-party notices](THIRD_PARTY.md).
+[development guide](GUIDE.md#development) for Luacheck, CI, and pre-commit.
+The adapted palettes are credited in [third-party notices](THIRD_PARTY.md).

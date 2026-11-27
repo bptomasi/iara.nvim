@@ -283,8 +283,8 @@ function M.apply(palette, terminal_background)
     end
     set_hl(0, name, spec)
   end
-  for index, slot in ipairs(M.TERMINAL) do
-    vim.g["terminal_color_" .. (index - 1)] = palette.base_16[slot]
+  for index, name in ipairs(M.TERMINAL) do
+    vim.g["terminal_color_" .. (index - 1)] = palette.base_16[name]
   end
   -- Keep ANSI black as a palette color for programs that request it.
   vim.g.terminal_color_0 = roles.mantle

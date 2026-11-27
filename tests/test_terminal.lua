@@ -615,12 +615,12 @@ end
 
 T["a shell exiting while hidden is disposed without a window"] = function()
   run("edit(...)", helpers.temp_dir())
-  local state = run([[
+  run([[
     terminal.toggle_main(); terminal.toggle_main()
     _G.wins = #vim.api.nvim_list_wins()
     vim.fn.chansend(registry.list()[1].job, "exit 0\n")
   ]])
-  state = wait_disposed()
+  local state = wait_disposed()
   eq(state.records, 0)
   eq(run("return #vim.api.nvim_list_wins() == _G.wins"), true)
 end

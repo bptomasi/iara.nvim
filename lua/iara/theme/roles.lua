@@ -241,8 +241,8 @@ local function identity_roles(palette, roles)
     -- readable on it too: virtual text and notices sit on their tint.
     local name, color = state[1], palette.base_30[state[2]]
     local soft = blend(color, roles.base, 12)
-    local surfaces = { roles.base, roles.mantle, soft }
-    roles[name] = readable(color, surfaces, M.TEXT, roles.fg)
+    local backgrounds = { roles.base, roles.mantle, soft }
+    roles[name] = readable(color, backgrounds, M.TEXT, roles.fg)
     roles[name .. "_soft"] = soft
   end
 end

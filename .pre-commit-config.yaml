@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: iara-quality
+        name: Iara formatting and static analysis
+        entry: make -k fmt-check lint
+        language: system
+        pass_filenames: false
+        always_run: true

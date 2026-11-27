@@ -363,12 +363,12 @@ local function file_rows(info, width)
   local glyph = icons.START.rule
   local cells = vim.api.nvim_strwidth(glyph)
   local rule = glyph:rep(math.floor(room / cells)) .. (" "):rep(room % cells)
-  local header = { text = title .. " " .. rule, menu = true }
-  header.marks = {
+  local heading = { text = title .. " " .. rule, menu = true }
+  heading.marks = {
     { 2, #title, "IaraStartSection" },
-    { #title + 1, #header.text, "IaraStartRule" },
+    { #title + 1, #heading.text, "IaraStartRule" },
   }
-  local rows = { header }
+  local rows = { heading }
   for _, file in ipairs(info.files) do
     local entry = {
       icon = icons.file(file.name),

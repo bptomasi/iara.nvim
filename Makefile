@@ -5,16 +5,18 @@
 # Requires GNU make.
 
 .DEFAULT_GOAL := help
-.PHONY: help tools fmt fmt-check lint test check bench \
+.PHONY: help tools fmt fmt-check lint lint-quality lint-lua test check bench \
 	dev gallery install install-default update repair rollback restore \
 	backups uninstall clean
 
 # Not NVIM: Neovim sets that to its server address in terminals.
 NVIM_BIN ?= nvim
-export NVIM_BIN
+LUACHECK_BIN ?= .tools/bin/luacheck
+export NVIM_BIN LUACHECK_BIN
 STYLUA = .tools/bin/stylua
+LUA_SOURCES = init.lua colors lua scripts tests
 STYLUA_ARGS = --config-path .stylua.toml --respect-ignores \
-	init.lua lua scripts tests
+	$(LUA_SOURCES)
 LAUNCHER ?= $(HOME)/.local/bin/iara
 BENCH_PATHS ?= 100000
 GALLERY ?= start
@@ -44,8 +46,9 @@ help: ## List the targets
 		| awk -F':.*## ' '{ printf "  %-16s %s\n", $$1, $$2 }'
 	@echo "Variables: TEST=path BACKUP=dir DRY_RUN=1 LAUNCHER=path"
 	@echo "  BENCH_PATHS=count GALLERY=scenarios NVIM_BIN=path"
+	@echo "  LUACHECK_BIN=path"
 
-tools: ## Install pinned StyLua, mini.nvim, parsers into .tools/
+tools: ## Install pinned StyLua, Luacheck, mini.nvim, and parsers
 	scripts/tools.sh
 
 fmt: ## Format Lua files with StyLua
@@ -54,14 +57,21 @@ fmt: ## Format Lua files with StyLua
 fmt-check: ## Check Lua formatting without writing
 	$(STYLUA) --check $(STYLUA_ARGS)
 
-lint: ## Run the quality checker (length, complexity, width)
+lint: lint-quality lint-lua ## Run the quality checker and Luacheck
+
+lint-quality: ## Check line length, function size, and complexity
 	NVIM_LOG_FILE=/dev/null "$(NVIM_BIN)" --clean -l scripts/quality.lua .
+
+lint-lua: ## Run static analysis with Luacheck
+	@command -v "$(LUACHECK_BIN)" >/dev/null 2>&1 || { \
+		echo "Luacheck is missing. Run make tools." >&2; exit 1; }
+	"$(LUACHECK_BIN)" --config .luacheckrc $(LUA_SOURCES)
 
 test: ## Run the test suite, or one file with TEST=tests/test_x.lua
 	scripts/test.sh $(TEST)
 
 check: ## Run fmt-check, lint, and every test (scripts/check.sh)
-	scripts/check.sh
+	MAKE="$(MAKE)" scripts/check.sh
 
 bench: ## Benchmark filename scoring (BENCH_PATHS=100000)
 	NVIM_LOG_FILE=/dev/null "$(NVIM_BIN)" --clean -l \

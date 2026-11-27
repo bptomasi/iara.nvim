@@ -202,7 +202,6 @@ end
 
 update["prunes obsolete releases and preserves linked directories"] = function()
   local env, repo, first = installed_then_updated()
-  local paths = fixture.std_paths(env)
   local store = vim.fs.dirname(first)
   local outside = helpers.temp_dir()
   helpers.write_file(outside .. "/release.json", read(first .. "/release.json"))

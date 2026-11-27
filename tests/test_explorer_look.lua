@@ -1,7 +1,5 @@
 -- Look of the file explorer (V11): root chip with the mark and branch,
 -- Git state as one colored dot, and readable tree groups in every theme.
-local helpers = require("helpers")
-
 local eq = MiniTest.expect.equality
 
 local explorer = require("iara.core.explorer")

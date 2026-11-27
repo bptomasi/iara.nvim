@@ -219,10 +219,10 @@ T["empty query"] = MiniTest.new_set()
 T["empty query"]["with a glob lists its files, no content"] = function()
   local m = manifest()
   local session = new_session({ glob = "!*.txt" })
-  local snapshot = settle(session)
+  settle(session)
   vim.wait(150) -- past the content debounce
   eq(proc.active_count(GREP_TAG), 0)
-  snapshot = session:snapshot()
+  local snapshot = session:snapshot()
   eq(snapshot.files.lane.state, "complete")
   eq(file_paths(snapshot), fixture.eligible(m, false, false, "exclusion"))
   eq({ snapshot.content.lane.state, #snapshot.content.groups }, { "idle", 0 })
@@ -247,10 +247,10 @@ end
 T["empty query"]["Find files lists every eligible file"] = function()
   local eligible = fixture.eligible(manifest(), false, false)
   local session = new_session({ mode = "files" })
-  local snapshot = settle(session)
+  settle(session)
   vim.wait(150) -- past the content debounce
   eq(proc.active_count(GREP_TAG), 0)
-  snapshot = session:snapshot()
+  local snapshot = session:snapshot()
   -- More files than the quota: the best 200 in listing order, and the
   -- total counts them all.
   eq(#eligible > 200, true)

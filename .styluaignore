@@ -1,2 +1,4 @@
 # Inputs for the quality checker tests; their layout is part of the test.
 tests/fixtures/quality/
+# Machine-specific configuration loaded by Iara.
+lua/user.lua

@@ -941,7 +941,7 @@ end
 ---@param records IaraSearchRecord[]
 ---@param title string
 ---@return integer id Quickfix list id.
-function Session:to_quickfix(records, title)
+function Session.to_quickfix(_, records, title)
   if type(records) ~= "table" or type(title) ~= "string" then
     error("search: to_quickfix expects records and a title", 2)
   end

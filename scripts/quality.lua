@@ -350,10 +350,10 @@ end
 
 local function first_error_row(root)
   local query = vim.treesitter.query.parse("lua", "(ERROR) @error")
-  for _, node in query:iter_captures(root, "") do
-    return (node:range())
-  end
-  return root:range()
+  local next_capture = query:iter_captures(root, "")
+  local _, node = next_capture()
+  local row = (node or root):range()
+  return row
 end
 
 local function check_lua(path, source, report)

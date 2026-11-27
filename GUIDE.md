@@ -739,11 +739,27 @@ tests/                   mini.test suites, helpers, fixtures
 ## Development
 
 ```sh
-scripts/tools.sh   # pinned StyLua and mini.nvim into .tools/
-scripts/check.sh   # StyLua check, quality checker, test suite
+scripts/tools.sh   # pinned development tools into .tools/
+scripts/check.sh   # StyLua, Luacheck, quality checker, test suite
 scripts/test.sh [tests/test_x.lua ...]        # tests only
 nvim --clean -l scripts/quality.lua [PATH...] # quality checker only
 ```
+
+The development tool installer targets Linux x86-64. `make lint-lua`
+runs Luacheck for undefined globals, unused variables, and shadowing.
+`make lint` also checks line length, function size, and complexity.
+The pinned Luacheck binary requires glibc 2.38. Export `LUACHECK_BIN` to
+use a locally installed Luacheck with `make tools`, lint, and pre-commit.
+
+With `pre-commit` installed, enable the hook once per clone:
+
+```sh
+make tools
+pre-commit install
+```
+
+The hook runs `make -k fmt-check lint` before each commit. GitHub Actions
+runs `make check` on pull requests and pushes to `main`.
 
 `test.sh` runs each test file in its own headless Neovim with its own
 temporary XDG directories, `IARA_TEST_JOBS` files at a time (default:
@@ -757,6 +773,9 @@ files need, such as the plugin mirror, are built once per run
 `-- iara-test: serial` runs alone after the others; `-- iara-test: slow`
 starts it first.
 
+Set `IARA_TEST_LUA_LS` to a `lua-language-server` executable to run the
+optional LuaLS integration test.
+
 ### Make targets
 
 Run `make` from the repository root (`make help` lists the targets). Each target
@@ -767,7 +786,9 @@ calls the scripts above; targets that change your directories accept
 | --- | --- |
 | `tools` | `scripts/tools.sh` (run once) |
 | `fmt`, `fmt-check` | StyLua write, or check only |
-| `lint` | quality checker |
+| `lint` | quality checker and Luacheck |
+| `lint-quality` | length and complexity checks only |
+| `lint-lua` | Luacheck only |
 | `test` | all tests in parallel, or one file: `TEST=tests/test_x.lua` |
 | `check` | `scripts/check.sh` (fmt-check, lint, tests) |
 | `bench` | filename scoring benchmark, optional `BENCH_PATHS=100000` |
