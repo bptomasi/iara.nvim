@@ -1,6 +1,6 @@
 # Development and installation shortcuts for Iara. Run from the root:
 #   make help
-# Every target calls an existing script; see README.md ("Make targets").
+# Every target calls an existing script. See GUIDE.md ("Make targets").
 # DRY_RUN=1 prints what a target would do to your directories instead.
 # Requires GNU make.
 
