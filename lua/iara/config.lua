@@ -40,7 +40,7 @@ local function default_values()
     options = {},
     keymaps = {},
     plugins = {},
-    features = { search = {}, terminal = {}, structured = {} },
+    features = { search = {}, terminal = {}, structured = {}, pdf = {} },
     languages = { lua = {} },
     formatters = { lua = { "stylua" } },
     extras = { agents = true, ai = true },

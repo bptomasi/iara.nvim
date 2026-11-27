@@ -20,6 +20,9 @@ local TOOLS = {
   { "curl", "parser downloads", "warn" },
   { "claude", "the optional Claude Code session", "info" },
   { "codex", "the optional Codex session", "info" },
+  { "pdfinfo", "the PDF viewer", "info" },
+  { "pdftoppm", "graphical PDF pages", "info" },
+  { "pdftotext", "the PDF text fallback", "info" },
 }
 
 local function report_mode()

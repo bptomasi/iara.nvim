@@ -21,6 +21,7 @@ _G.preview = {
   win = { buf = scratch, win = win, valid = function()
     return vim.api.nvim_win_is_valid(win)
   end },
+  minimal = function() end,
   reset = function(self)
     self.title = nil
     self:set_buf(scratch)
@@ -246,6 +247,29 @@ T["preview"]["refuses binary files and cuts long lines"] = function()
   wait_lines({ ("x"):rep(1000), "" })
   -- Cut lines are short enough for regex syntax (S11).
   eq(child.lua_get("highlighting()"), "text")
+end
+
+T["preview"]["PDFs use the first page and respect the capability"] = function()
+  local path = write("sample.PDF", "%PDF fixture\0")
+  child.lua([[
+    require("iara.features.pdf.source").text = function(_, page, done)
+      assert(page == 1)
+      vim.schedule(function() done({ "PDF first page" }) end)
+      return { cancel = function() end }
+    end
+  ]])
+  child.lua("previewer:show(preview, { path = ... })", { path })
+  wait_lines({ "PDF first page" })
+  local config = write("personal.lua", "return { features = { pdf = false } }")
+  child.lua(
+    [[
+    local path, config = ...
+    require("iara.config").load({ personal_path = config })
+    previewer:show(preview, { path = path })
+  ]],
+    { path, config }
+  )
+  wait_lines({ "Binary file: no preview." })
 end
 
 T["preview"]["shows the start of a minified file"] = function()

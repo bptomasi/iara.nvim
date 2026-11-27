@@ -56,6 +56,11 @@ M.STEPS = {
     capability = "features.structured",
   },
   {
+    module = "iara.features.pdf",
+    safe = false,
+    capability = "features.pdf",
+  },
+  {
     module = "iara.extras.agents",
     safe = false,
     capability = "extras.agents",

@@ -345,7 +345,34 @@ function Previewer:show_cached(preview, target, window)
   )
 end
 
+local function clear_pdf(self)
+  if self.pdf then
+    require("iara.features.pdf.preview").close(self.pdf)
+    self.pdf = nil
+  end
+end
+
+local function is_pdf(path)
+  return require("iara.features.pdf").matches(path)
+    and vim.g.iara_mode ~= "safe"
+    and require("iara.config").enabled("features.pdf")
+end
+
+local function show_pdf(self, preview, path)
+  show_message(preview, "Loading PDF preview…")
+  preview:minimal()
+  local token = self.token
+  vim.defer_fn(function()
+    if self:is_current(token, preview) then
+      self.pdf_cache = self.pdf_cache or {}
+      self.pdf =
+        require("iara.features.pdf.preview").open(preview, path, self.pdf_cache)
+    end
+  end, self.moving and M.DEBOUNCE_MS or 0)
+end
+
 local function supersede(self)
+  clear_pdf(self)
   self.token = self.token + 1
   if self.fresh_timer then
     self.fresh_timer:stop()
@@ -375,6 +402,9 @@ function Previewer:show(preview, target)
   if type(target.path) ~= "string" then
     error("picker.preview: target needs lines or a path", 2)
   end
+  if is_pdf(target.path) then
+    return show_pdf(self, preview, target.path)
+  end
   local window = read.cached(target.path, target.row)
   if window then
     return self:show_cached(preview, target, window)
@@ -393,6 +423,11 @@ end
 ---Stop publishing; pending reads are dropped and the pooled buffers
 ---deleted. Idempotent.
 function Previewer:close()
+  clear_pdf(self)
+  if self.pdf_cache then
+    require("iara.features.pdf.preview").close_cache(self.pdf_cache)
+    self.pdf_cache = nil
+  end
   self.closed = true
   if self.fresh_timer then
     self.fresh_timer:close()

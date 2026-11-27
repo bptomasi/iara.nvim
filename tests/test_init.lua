@@ -129,10 +129,17 @@ startup["records a failing step and continues with the next"] = function()
 end
 
 startup["skips steps of disabled capabilities"] = function()
-  local runtime = fake_runtime({ "iara.features.terminal" })
-  local personal = personal_file("return { features = { terminal = false } }")
+  local runtime = fake_runtime({
+    "iara.features.terminal",
+    "iara.features.pdf",
+  })
+  local personal = personal_file([[
+    return { features = { terminal = false, pdf = false } }
+  ]])
   local result = setup_in_child(runtime, personal)
-  eq(step_states(result.status)["iara.features.terminal"], "disabled")
+  local states = step_states(result.status)
+  eq(states["iara.features.terminal"], "disabled")
+  eq(states["iara.features.pdf"], "disabled")
   eq(result.calls, {})
 end
 

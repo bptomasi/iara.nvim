@@ -557,6 +557,30 @@ Oil opens an editable directory buffer in the current window. Press
 when hidden files are off. Edit the listing and use `:write` to apply
 changes. Deleted files go to the system trash.
 
+### PDFs
+
+Open a local PDF with `:IaraPDF path/to/file.pdf`, `:edit`, or by selecting
+it in Oil or the file picker. Graphical pages are centered in their split.
+Scroll continuously with the mouse wheel, `j`, `k`, `Ctrl-d`, or `Ctrl-u`.
+Use `]p` and `[p` to jump by page, `gg` and `G` to jump to either end,
+and `q` to close the viewer. The page counter stays in the statusline.
+Use `+` and `-` to zoom and `0` to restore the original fit. Zoom
+keeps the same reading position. On Foot, high zoom levels show the
+center of the page, clipped to the split width.
+
+The file picker previews the first page. Graphical viewing uses Poppler
+(`pdfinfo` and `pdftoppm`), ImageMagick, and a compatible terminal. Foot
+uses Sixel and can use `img2sixel` for faster encoding. Kitty and
+Ghostty use the Kitty graphics protocol. The
+viewer renders visible pages and preloads adjacent ones. With text-only
+viewing, the picker uses `pdftotext` and `j` and `k` move by page in the
+viewer. Poppler's commands are in `poppler-utils` on Debian and Ubuntu.
+
+Set `features = { pdf = false }` in your personal configuration and
+restart Iara to disable the PDF command, automatic opening, and preview.
+
+### Formatting
+
 Formatting is explicit only. It needs `stylua` and a `stylua.toml` or
 `.stylua.toml` between the file and the project root, or the absolute
 paths in `languages.lua.stylua` and `languages.lua.stylua_config`.

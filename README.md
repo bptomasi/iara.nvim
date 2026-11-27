@@ -32,6 +32,7 @@ options and recovery.
 - Find files with `Space ff` and search their contents with `Space fw`.
   Narrow by directory or glob, preview matches, and send them to quickfix.
 - Browse the current file's directory in Oil with `Space d`.
+- Open a PDF with `:IaraPDF path/to/file.pdf` and scroll with `j` and `k`.
 - Toggle the project shell with `F7`. Move it to an edge or float it
   while the shell keeps running.
 - Inspect JSON and YAML paths at the cursor and search keys.

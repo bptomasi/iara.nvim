@@ -118,12 +118,16 @@ local function part(module, ...)
 end
 
 ---Buffer shown in the window whose statusline is being drawn.
-local function drawn_buffer()
+local function drawn_window()
   local window = vim.g.statusline_winid
   if window and vim.api.nvim_win_is_valid(window) then
-    return vim.api.nvim_win_get_buf(window)
+    return window
   end
-  return vim.api.nvim_get_current_buf()
+  return vim.api.nvim_get_current_win()
+end
+
+local function drawn_buffer()
+  return vim.api.nvim_win_get_buf(drawn_window())
 end
 
 ---Root part, only for buffers that name a file or carry an owner's
@@ -401,6 +405,10 @@ end
 ---Cursor position at the right edge; scratch screens (start screen,
 ---tool windows) have none.
 local function position_segment(bufnr)
+  if vim.bo[bufnr].filetype == "iara-pdf" then
+    local page = vim.w[drawn_window()].iara_pdf_page
+    return page and colored("IaraStatusPosition", page) or ""
+  end
   if vim.bo[bufnr].buftype ~= "" then
     return ""
   end
