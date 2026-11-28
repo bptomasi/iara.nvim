@@ -2,6 +2,7 @@
 --- scrolling only repaints page pixels and clears exposed blank cells.
 local cache = require("iara.features.pdf.sixel_cache")
 local data = require("iara.features.pdf.sixel_data")
+local geometry = require("iara.features.pdf.geometry")
 local scroll = require("iara.features.pdf.sixel_scroll")
 local api = vim.api
 
@@ -24,19 +25,7 @@ local function size()
 end
 
 local function pixels(rect)
-  local cell = size()
-  local visible = rect.visible_width or rect.width
-  local width = math.max(1, math.floor(visible * cell.cell_width))
-  local page_width = math.max(1, math.floor(rect.width * cell.cell_width))
-  local overflow = rect.width - visible
-  local position = overflow > 0 and (rect.offset or overflow / 2) / overflow
-    or 0
-  return {
-    width = width,
-    height = math.max(6, math.floor(rect.height * cell.cell_height / 6) * 6),
-    page_width = page_width,
-    offset = math.floor((page_width - width) * position + 0.5),
-  }
+  return geometry.pixels(rect, size())
 end
 
 local function move(row, col)
@@ -400,18 +389,27 @@ local function sync_start_cover(regions)
   motion.set_cover(overlays)
 end
 
+local function clear_grid()
+  -- Ctrl-L resends the terminal grid, but :normal can move an Insert-mode
+  -- caret back onto the preceding character, including in a picker prompt.
+  local mode = api.nvim_get_mode().mode:sub(1, 1)
+  local view = (mode == "i" or mode == "R") and vim.fn.winsaveview()
+  flushing = true
+  vim.cmd.normal({ args = { "\12" }, bang = true })
+  if view then
+    vim.fn.winrestview(view)
+  end
+  api.nvim__redraw({ flush = true })
+  flushing = false
+end
+
 local function paint(damaged)
   local regions = collect()
   sync_start_cover(regions)
   -- The old image cells may now contain editor text or window chrome.
   local old = previous
   if needs_clear(regions) then
-    -- Ctrl-L clears and resends the terminal grid. A plain :redraw! can
-    -- leave old graphics and skip text the UI considers already drawn.
-    flushing = true
-    vim.cmd.normal({ args = { "\12" }, bang = true })
-    api.nvim__redraw({ flush = true })
-    flushing = false
+    clear_grid()
     old = {}
   end
   previous = regions

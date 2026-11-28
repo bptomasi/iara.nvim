@@ -1,7 +1,9 @@
---- Split ImageMagick's Sixel raster into six-pixel bands once. Each
---- viewport slice carries the palette and starts on a complete band.
+--- Pack cached Sixel bands for the visible viewport.
+local ffi = require("ffi")
 local M = {}
 local masks = {}
+local scratch_size = 64 * 1024
+local scratch = ffi.new("uint8_t[?]", scratch_size)
 
 function M.decode(data)
   local width, height, body =
@@ -72,28 +74,71 @@ function M.pack(frame, first, last)
   return packet(frame, pixels, body), pixels
 end
 
+local function translation(shift, rows)
+  local key = shift * 8 + rows
+  local map = masks[key]
+  if not map then
+    map = ffi.new("uint8_t[256]")
+    for byte = 0, 255 do
+      map[byte] = byte
+    end
+    -- Only the Sixel pixel masks occupy ASCII 63–126.
+    local scale, modulo = 2 ^ shift, 2 ^ rows
+    for bits = 0, 63 do
+      map[63 + bits] = 63 + math.floor(bits * scale) % modulo
+    end
+    masks[key] = map
+  end
+  return map
+end
+
 local function translate(bytes, shift, rows)
   if shift == 0 and rows == 6 then
     return bytes
   end
-  local key = shift * 8 + rows
-  local map = masks[key]
-  if not map then
-    map = {}
-    masks[key] = map
-    local scale, modulo = 2 ^ shift, 2 ^ rows
-    for bits = 0, 63 do
-      map[string.char(63 + bits)] =
-        string.char(63 + math.floor(bits * scale) % modulo)
-    end
+  local count = #bytes
+  local map = translation(shift, rows)
+  local output = count <= scratch_size and scratch
+    or ffi.new("uint8_t[?]", count)
+  local source = ffi.cast("const uint8_t*", bytes)
+  for index = 0, count - 1 do
+    output[index] = map[source[index]]
   end
-  -- Sixel data characters encode six vertical bits. Commands and their
-  -- numeric arguments lie below this range and pass through unchanged.
-  return (bytes:gsub("[?-~]", map))
+  return ffi.string(output, count)
 end
 
 local function band_at(frame, index)
   return frame.bands[index - frame.first + 1] or frame.raster.bands[index]
+end
+
+local function band_bytes(frame, first, last)
+  local total = 0
+  for index = first, last do
+    local band = band_at(frame, index)
+    if not band then
+      return
+    end
+    total = total + #band
+  end
+  return total
+end
+
+---Size of a strip's pixel data, including band and plane separators.
+function M.row_bytes(frame, source, height)
+  local index, phase = math.floor(source / 6) + 1, source % 6
+  local count = math.ceil(height / 6)
+  local upper = band_bytes(frame, index, index + count - 1)
+  if not upper then
+    return
+  end
+  if phase == 0 then
+    return upper + count - 1
+  end
+  local joined = math.floor((height + phase - 1) / 6)
+  local lower = band_bytes(frame, index + 1, index + joined)
+  if lower then
+    return upper + lower + joined + count - 1
+  end
 end
 
 local function encode_rows(frame, index, phase, rows)

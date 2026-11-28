@@ -562,19 +562,26 @@ changes. Deleted files go to the system trash.
 Open a local PDF with `:IaraPDF path/to/file.pdf`, `:edit`, or by selecting
 it in Oil or the file picker. Graphical pages are centered in their split.
 Scroll continuously with the mouse wheel, `j`, `k`, `Ctrl-d`, or `Ctrl-u`.
+In the graphical viewer, tap `jj` or `kk` quickly and hold the second
+press to scroll four lines per repeat once the repeats start. Holding
+one key from the first press uses one line per repeat. The faster speed
+resets after a pause or direction change.
 Use `]p` and `[p` to jump by page, `gg` and `G` to jump to either end,
-and `q` to close the viewer. The page counter stays in the statusline.
+and `q` to close the viewer. Press `gp` to enter a page number or type
+`42G` to jump straight to page 42. The page counter stays in the statusline.
 Use `+` and `-` to zoom and `0` to restore the original fit. Zoom
 keeps the same reading position. On Foot, each split has its own zoom
 level up to 600%, and the page is clipped to that split's bounds.
+At high zoom, the visible area sharpens to screen resolution once the
+zoom or scroll settles.
 When the page extends past the sides, drag or click its bottom scrollbar,
 use `h` and `l`, or scroll horizontally with the mouse.
 
 The file picker previews the first page. Graphical viewing uses Poppler
 (`pdfinfo` and `pdftoppm`), ImageMagick, and a compatible terminal. Foot
-uses Sixel and can use `img2sixel` for faster encoding. Kitty and
-Ghostty use the Kitty graphics protocol. The
-viewer renders visible pages and preloads adjacent ones. With text-only
+encodes visible Sixel bands directly and can fall back to `img2sixel` or
+ImageMagick. Kitty and Ghostty use the Kitty graphics protocol. The viewer
+renders visible pages and preloads adjacent ones. With text-only
 viewing, the picker uses `pdftotext` and `j` and `k` move by page in the
 viewer. Poppler's commands are in `poppler-utils` on Debian and Ubuntu.
 

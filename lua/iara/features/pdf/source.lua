@@ -86,9 +86,7 @@ end
 
 local raster_options = { timeout = 15000, stdout = { mode = "discard" } }
 
-function M.raster(path, page, prefix, size, callback, format)
-  local output_path = prefix .. (format == "ppm" and ".ppm" or ".png")
-  local argv = raster_command(path, page, page, prefix, size, format)
+local function render(path, argv, output_path, callback)
   return run(path, argv, raster_options, function(output, err)
     local info = output and vim.uv.fs_stat(output_path)
     if info then
@@ -97,6 +95,34 @@ function M.raster(path, page, prefix, size, callback, format)
     vim.uv.fs_unlink(output_path)
     callback(nil, err or (output and "Could not rasterize PDF page."))
   end)
+end
+
+function M.raster(path, page, prefix, size, callback, format)
+  local output_path = prefix .. (format == "ppm" and ".ppm" or ".png")
+  local argv = raster_command(path, page, page, prefix, size, format)
+  return render(path, argv, output_path, callback)
+end
+
+function M.crop(path, page, prefix, crop, callback)
+  local number = tostring(page)
+  local argv = { "pdftoppm", "-f", number, "-l", number, "-singlefile" }
+  vim.list_extend(argv, {
+    "-scale-to-x",
+    tostring(crop.page_width),
+    "-scale-to-y",
+    tostring(crop.page_height),
+    "-x",
+    tostring(crop.x),
+    "-y",
+    tostring(crop.y),
+    "-W",
+    tostring(crop.width),
+    "-H",
+    tostring(crop.height),
+    path,
+    prefix,
+  })
+  return render(path, argv, prefix .. ".ppm", callback)
 end
 
 local function batch_page(path)

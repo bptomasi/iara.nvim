@@ -90,6 +90,29 @@ local function matching_rows(before, after, first, last, delta)
   return overlap
 end
 
+local function aligned_edge(slice, start, finish, skip, height)
+  if skip % 6 == 0 or slice.cell % 1 ~= 0 then
+    return start, skip, height
+  end
+  local rows =
+    math.min(5, start - slice.row, math.ceil((finish - start + 1) / 2))
+  for offset = 1, rows do
+    local inset = offset * slice.cell
+    local source = skip - inset
+    if source % 6 == 0 then
+      local exact = data.row_bytes(slice.frame, skip, height)
+      local aligned = data.row_bytes(slice.frame, source, height + inset)
+      -- Repaint a few retained rows only when the aligned packet drops
+      -- enough bytes to offset the extra pixels sent to the terminal.
+      if exact and aligned and aligned <= exact * 0.8 then
+        return start - offset, source, height + inset
+      end
+      break
+    end
+  end
+  return start, skip, height
+end
+
 local function edge(slice, first, last)
   local bottom = slice.row + slice.rows - 1
   local start, finish = math.max(slice.row, first), math.min(bottom, last)
@@ -99,6 +122,7 @@ local function edge(slice, first, last)
   local skip = pixel_row(slice, start)
   local height =
     math.min((finish - start + 1) * slice.cell, pixel_limit(slice) - skip)
+  start, skip, height = aligned_edge(slice, start, finish, skip, height)
   local graphic = data.pack_rows(slice.frame, skip, height)
   if graphic then
     return ("\27[%d;%dH"):format(start, slice.col) .. graphic

@@ -105,30 +105,29 @@ local function visible_task(entry)
   return next_task
 end
 
-local function ahead(entry, span)
-  -- Warm up to a third of a viewport in the direction of movement.
+local function leading_bands(entry, span)
+  -- Prepare two more wheel steps ahead, within the cache budget.
+  local window = span.last - span.first + 1
   local distance =
-    math.min(96, math.max(margin, math.ceil((span.last - span.first + 1) / 3)))
-  local before = span.backward and distance or margin
-  local after = span.backward and margin or distance
-  local lower = request(
-    entry,
-    span.last + 1,
-    math.min(entry.count, span.last + after),
-    0,
-    span.stamp
-  )
-  local upper = request(
-    entry,
-    math.max(1, span.first - before),
-    span.first - 1,
-    0,
-    span.stamp
-  )
+    math.min(128, math.max(margin, math.ceil(window / 3), 2 * span.step))
   if span.backward then
-    return upper or lower
+    return math.max(1, span.first - distance), span.first - 1
   end
-  return lower or upper
+  return span.last + 1, math.min(entry.count, span.last + distance)
+end
+
+local function ahead(entry, span)
+  local first, last = leading_bands(entry, span)
+  local lead = request(entry, first, last, 0, span.stamp)
+  if lead or span.step > 0 then
+    return lead
+  end
+  if span.backward then
+    first, last = span.last + 1, math.min(entry.count, span.last + margin)
+  else
+    first, last = math.max(1, span.first - margin), span.first - 1
+  end
+  return request(entry, first, last, 0, span.stamp)
 end
 
 local function background_task(entry)
@@ -181,20 +180,35 @@ local function intersects(task, span)
   return task.first <= span.last and span.first <= task.last
 end
 
+local function still_ahead(entry, task, span)
+  if task.priority ~= 0 or entry.no_margin then
+    return false
+  end
+  local first, last = leading_bands(entry, span)
+  return task.first <= last
+    and first <= task.last
+    and not missing(entry, span.first, span.last)
+end
+
 local function discard_obsolete(entry)
-  if not entry.task then
+  local task = entry.task
+  if not task then
     return
   end
+  local ahead_of_view = false
   for _, span in pairs(entry.visible) do
-    if intersects(entry.task, span) then
+    if intersects(task, span) then
       local missing_first = missing(entry, span.first, span.last)
       if missing_first then
-        entry.task.priority = math.max(entry.task.priority, span.priority)
+        task.priority = math.max(task.priority, span.priority)
       end
       return
     end
+    ahead_of_view = ahead_of_view or still_ahead(entry, task, span)
   end
-  cancel(entry)
+  if not ahead_of_view then
+    cancel(entry)
+  end
 end
 
 local function protected(entry, band)
@@ -219,7 +233,8 @@ local function bound(entry)
 end
 
 local function store(entry, task, result, full)
-  if full or not entry.raster then
+  -- An upgraded source can contain colors that the smaller raster missed.
+  if full or not entry.raster or entry.raster.palette ~= result.palette then
     entry.raster = {
       width = result.width,
       height = result.height,
@@ -400,14 +415,17 @@ function M.want(entry, key, first, last, focused)
     return
   end
   sequence = sequence + 1
-  local backward = old
-    and (first < old.first or (first == old.first and old.backward))
+  local movement = old and first - old.first or 0
+  if old and movement == 0 then
+    movement = last - old.last
+  end
   entry.visible[key] = {
     first = first,
     last = last,
     priority = priority,
     stamp = sequence,
-    backward = backward,
+    backward = movement < 0 or (movement == 0 and old and old.backward),
+    step = math.abs(movement),
   }
   entry.hint = nil
   discard_obsolete(entry)

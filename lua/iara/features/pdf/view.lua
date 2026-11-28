@@ -2,6 +2,8 @@
 local source = require("iara.features.pdf.source")
 local graphics = require("iara.features.pdf.graphics")
 local layout = require("iara.features.pdf.layout")
+local geometry = require("iara.features.pdf.geometry")
+local detail = require("iara.features.pdf.detail")
 local scrollbar = require("iara.features.pdf.scrollbar")
 local raster_cache = require("iara.features.pdf.raster_cache")
 local api = vim.api
@@ -12,6 +14,12 @@ local CACHE_BYTES = 24 * 1024 * 1024
 local refresh
 local go
 local zoom_step = 25
+local double_tap_ns = 180 * 1e6
+local repeat_start_ns = 900 * 1e6
+local repeat_idle_ns = 250 * 1e6
+local tap_pause_ns = 130 * 1e6
+local tap_pause_margin_ns = 45 * 1e6
+local fast_scroll_rows = 4
 local virtual_views = {}
 local pointer_listener
 local drag
@@ -38,7 +46,7 @@ end
 local function show_text(view, body)
   local header = view.name
   if view.info then
-    header = ("%s  ·  %d/%d  ·  j/k page  ·  q close"):format(
+    header = ("%s  ·  %d/%d  ·  j/k page  ·  gp go to  ·  q close"):format(
       header,
       view.page,
       view.info.count
@@ -94,6 +102,7 @@ end
 
 local function use_text(view, reason)
   clear_pictures(view)
+  detail.close(view.detail, view.panes)
   local display = vim.fn.win_findbuf(view.buf)[1]
   local pane = display and window_layout(view, display)
   if pane and pane.pages then
@@ -143,7 +152,10 @@ end
 local function slot_size(view, slot)
   local longest =
     math.max(slot.width * view.cell_width, slot.height * view.cell_height)
-  return math.min(3072, math.max(1024, math.ceil(longest / 256) * 256))
+  return math.min(
+    geometry.raster_limit,
+    math.max(1024, math.ceil(longest / 256) * 256)
+  )
 end
 
 local function raster_size(view, page)
@@ -212,8 +224,9 @@ local function finish_page(view, page, request, path, err, bytes)
   enqueue(view)
 end
 
-local function load_page(view, page, optional)
-  local size = optional and adjacent_size(view, page) or raster_size(view, page)
+local function load_page(view, page, optional, size)
+  size = size
+    or (optional and adjacent_size(view, page) or raster_size(view, page))
   local prefix = raster_prefix(view, page, size)
   local format = raster_format(view)
   local identity = page == 1 and raster_cache.identity(view.path, format)
@@ -385,6 +398,16 @@ local function prefetch(view, queue, wanted, visible_count)
   if last > first and first ~= 1 then
     return start_batch(view, first, last, size)
   end
+  -- While scrolling, replenish the lookahead in batches if the nearest
+  -- page is already ready. Keep its slot free for anything visible.
+  local next_page = queue[visible_count + 1]
+  if
+    first ~= next_page
+    and view.rasters[next_page]
+    and scroll_delay(view) > 0
+  then
+    return
+  end
   load_page(view, first, true)
 end
 
@@ -397,16 +420,18 @@ local function urgent_raster(view, queue, visible_count)
   end
 end
 
-local function defer_sharpening(view)
+local function settle_after_scroll(view)
   local remaining = scroll_delay(view)
-  if remaining <= 0 then
+  if view.closed or remaining <= 0 then
     return false
   end
-  if not view.sharpen_pending then
-    view.sharpen_pending = true
+  if not view.settle_pending then
+    view.settle_pending = true
     vim.defer_fn(function()
-      view.sharpen_pending = false
-      enqueue(view)
+      view.settle_pending = false
+      if not settle_after_scroll(view) then
+        enqueue(view)
+      end
     end, remaining)
   end
   return true
@@ -451,10 +476,7 @@ local function sharpen_page(view, queue, visible_count)
       and size ~= entry.failed_size
       and graphics.ready(entry.path, view.slots[page])
     then
-      if not defer_sharpening(view) then
-        return page
-      end
-      return
+      return scroll_delay(view) <= 0 and page or nil
     end
   end
 end
@@ -469,9 +491,10 @@ local function request_pages(view, queue, wanted, visible_count)
     return cancel_raster(view, wanted, urgent)
   end
   if urgent then
-    return load_page(view, urgent)
+    local size = scroll_delay(view) > 0 and adjacent_size(view, urgent) or nil
+    return load_page(view, urgent, false, size)
   end
-  if view.zoom_at then
+  if view.zoom_at or (view.detail and view.detail.work) then
     return
   end
   local sharpen = sharpen_page(view, queue, visible_count)
@@ -537,6 +560,7 @@ local function arrange_pane(view, win, size)
     return
   end
   local pages, _, last = layout.arrange(view.info, cols, rows, pane.zoom, true)
+  detail.prune(pane)
   local previous = pane.pages or (view.anchor and view.anchor.pages)
   local top = view.tops[win] or (view.anchor and view.anchor.top) or 1
   pane.pages, pane.last_row = pages, last
@@ -567,9 +591,9 @@ local function topline(view, win)
   return vim.fn.getwininfo(win)[1].topline
 end
 
-local function page_rect(view, win, slot, x)
+local function page_rect(view, win, slot, x, tile)
   local pane = view.panes[win]
-  return {
+  local rect = {
     x = x,
     y = slot.row - 1,
     width = slot.width,
@@ -591,19 +615,30 @@ local function page_rect(view, win, slot, x)
       end
     end,
   }
+  if tile then
+    rect.y = rect.y + tile.crop.first
+    rect.height = tile.crop.last - tile.crop.first
+    rect.width, rect.offset = rect.visible_width, nil
+    rect.on_error = function()
+      detail.discard(tile)
+      enqueue(view)
+    end
+  end
+  return rect
 end
 
-local function draw_page(view, win, page, slot, pictures)
+local function draw_page(view, win, page, slot, pictures, tile)
   local raster = view.rasters[page]
   if not raster then
     return
   end
+  local path = tile and tile.path or raster.path
   local x = math.floor((api.nvim_win_get_width(win) - slot.visible_width) / 2)
   local current = pictures[page]
   if
     current
     and current.x == x
-    and current.path == raster.path
+    and current.path == path
     and current.slot == slot
     and current.offset == slot.offset
   then
@@ -612,13 +647,14 @@ local function draw_page(view, win, page, slot, pictures)
   if current then
     current.image:clear()
   end
-  local rect = page_rect(view, win, slot, x)
-  local picture = graphics.picture(raster.path, win, view.buf, rect)
+  local rect = page_rect(view, win, slot, x, tile)
+  local picture = graphics.picture(path, win, view.buf, rect)
   pictures[page] = {
     x = x,
     image = picture,
-    path = raster.path,
+    path = path,
     slot = slot,
+    rect = rect,
     offset = slot.offset,
   }
 end
@@ -635,12 +671,26 @@ local function clamp_zoom(value, virtual)
   return math.max(50, math.min(virtual and 600 or 300, value))
 end
 
+local function zoom_rect(view, win, pane, slot, width, height, visible)
+  local offset = math.max(0, topline(view, win) - slot.row)
+  local skip = math.max(0, math.floor(offset * height / slot.height + 0.5) - 1)
+  return {
+    width = width,
+    height = height,
+    visible_width = visible,
+    offset = scrollbar.offset(width, visible, pane.pan),
+    skip = skip,
+    rows = api.nvim_win_get_height(win),
+  }
+end
+
 local function prepare_zoom(view, win, pane, page)
   local entry = view.rasters[page]
   local slot = pane.pages[page]
   if
     entry.hint == slot
     or win ~= api.nvim_get_current_win()
+    or scroll_delay(view) > 0
     or not graphics.ready(entry.path, slot)
   then
     return
@@ -660,18 +710,13 @@ local function prepare_zoom(view, win, pane, page)
       and pane.pages[page] == slot
       and view.rasters[page] == entry
       and api.nvim_get_current_win() == win
+      and layout.page_at(pane.pages, topline(view, win)) == page
+      and scroll_delay(view) <= 0
     then
-      local offset = math.max(0, topline(view, win) - slot.row)
-      local skip =
-        math.max(0, math.floor(offset * height / slot.height + 0.5) - 1)
-      graphics.warm_zoom(entry.path, {
-        width = width,
-        height = height,
-        visible_width = visible,
-        offset = scrollbar.offset(width, visible, pane.pan),
-        skip = skip,
-        rows = api.nvim_win_get_height(win),
-      })
+      local rect = zoom_rect(view, win, pane, slot, width, height, visible)
+      graphics.warm_zoom(entry.path, rect)
+    elseif entry.hint == slot then
+      entry.hint = nil
     end
   end, 100)
 end
@@ -692,7 +737,7 @@ local function sampled_pan(view, win, pane, top)
       return pane.pan
     end
     for _, picture in pairs(view.pictures[win] or {}) do
-      if not graphics.ready(picture.path, picture.slot) then
+      if not graphics.ready(picture.path, picture.rect) then
         -- Finish the current crop. The worker's completion will pick up
         -- the latest pointer position while the thumb keeps following it.
         return sample.position
@@ -733,9 +778,34 @@ local function have_rasters(view, first, last)
   return true
 end
 
+local function draw_pages(view, win, pane, first, last, top)
+  local pictures = view.pictures[win] or {}
+  view.pictures[win] = pictures
+  for page, picture in pairs(pictures) do
+    if page < first or page > last then
+      picture.image:clear()
+      pictures[page] = nil
+    end
+  end
+  local screen = view.detail
+    and {
+      top = top,
+      rows = api.nvim_win_get_height(win) - (pane.bar and 1 or 0),
+      cell = { cell_width = view.cell_width, cell_height = view.cell_height },
+      settled = not view.zoom_at and scroll_delay(view) <= 0,
+    }
+  for page = first, last do
+    local slot = pane.pages[page]
+    local tile = screen
+      and detail.picture(view.detail, pane, page, slot, screen)
+    draw_page(view, win, page, slot, pictures, tile)
+  end
+end
+
 local function window_pages(view, win, pane, add)
   local top = topline(view, win)
   local first, last = visible_slots(view, win, pane, top, add)
+  detail.prune(pane, first, last)
   -- Preserve the last complete viewport until all visible pages exist.
   if view.virtual and not have_rasters(view, first, last) then
     return first - 1, last + 1
@@ -745,17 +815,7 @@ local function window_pages(view, win, pane, add)
     view.anchor = { pages = pane.pages, top = top }
   end
   set_page_counter(view, win, first)
-  local pictures = view.pictures[win] or {}
-  view.pictures[win] = pictures
-  for page, picture in pairs(pictures) do
-    if page < first or page > last then
-      picture.image:clear()
-      pictures[page] = nil
-    end
-  end
-  for page = first, last do
-    draw_page(view, win, page, pane.pages[page], pictures)
-  end
+  draw_pages(view, win, pane, first, last, top)
   if view.virtual then
     prepare_zoom(view, win, pane, first)
   end
@@ -764,6 +824,8 @@ end
 
 local function visible_windows(view)
   local windows = {}
+  local preferred = scroll_delay(view) > 0 and view.scroll_win
+    or api.nvim_get_current_win()
   for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
     local config = api.nvim_win_get_config(win)
     if config.relative ~= "" and config.focusable then
@@ -772,7 +834,11 @@ local function visible_windows(view)
       return {}
     end
     if config.relative == "" and api.nvim_win_get_buf(win) == view.buf then
-      windows[#windows + 1] = win
+      if win == preferred then
+        table.insert(windows, 1, win)
+      else
+        windows[#windows + 1] = win
+      end
     end
   end
   return windows
@@ -825,15 +891,28 @@ local function page_requests(view, windows)
   return queue, wanted, visible
 end
 
+local function clear_window_pictures(view, win, pictures)
+  graphics.clear(pictures)
+  view.pictures[win] = nil
+  local pane = view.panes[win]
+  if not pane then
+    return
+  end
+  pane.bar = nil
+  if
+    not api.nvim_win_is_valid(win)
+    or api.nvim_win_get_buf(win) ~= view.buf
+    or api.nvim_win_get_tabpage(win) ~= api.nvim_get_current_tabpage()
+  then
+    detail.prune(pane)
+  end
+end
+
 refresh = function(view)
   local windows = visible_windows(view)
   for win, pictures in pairs(view.pictures) do
     if not vim.tbl_contains(windows, win) then
-      graphics.clear(pictures)
-      view.pictures[win] = nil
-      if view.panes[win] then
-        view.panes[win].bar = nil
-      end
+      clear_window_pictures(view, win, pictures)
     end
   end
   if #windows == 0 then
@@ -855,6 +934,13 @@ refresh = function(view)
   graphics.refresh()
 end
 
+local function mark_motion(view, win)
+  view.scroll_win = win
+  view.scrolled_at = vim.uv.now()
+  settle_after_scroll(view)
+  enqueue(view, true)
+end
+
 local function scroll_virtual(view, win, rows)
   local pane = view.panes[win]
   if not pane or not pane.pages or view.closed or not view.graphical then
@@ -866,8 +952,7 @@ local function scroll_virtual(view, win, rows)
   local target = math.max(1, math.min(top + rows, limit))
   if target ~= top then
     view.tops[win] = target
-    view.scrolled_at = vim.uv.now()
-    enqueue(view, true)
+    mark_motion(view, win)
   end
 end
 
@@ -875,7 +960,7 @@ local function move_pan(view, win, position)
   local pane = view.panes[win]
   if pane and pane.bar and pane.pan ~= position then
     pane.pan = position
-    enqueue(view, true)
+    mark_motion(view, win)
   end
 end
 
@@ -933,6 +1018,7 @@ local function press_bar(mouse, view)
 end
 
 local function wheel(view, win, axis, direction)
+  view.scroll_key = nil
   local amount = tonumber(vim.o.mousescroll:match(axis .. ":(%d+)")) or 3
   if axis == "hor" then
     if not view.panes[win] or not view.panes[win].bar then
@@ -1003,11 +1089,72 @@ local function bind_pan(view)
   end
 end
 
+local function scroll_key_phase(previous, gap)
+  if previous.phase == "first" then
+    if gap <= double_tap_ns then
+      previous.pair_gap = gap
+      return "pair"
+    end
+    return "normal"
+  end
+  if previous.phase == "pair" then
+    -- A held key can also produce a quick pair. A pause before the next
+    -- event distinguishes a tap followed by a new hold from steady repeats.
+    local pause =
+      math.max(tap_pause_ns, previous.pair_gap + tap_pause_margin_ns)
+    return gap >= pause and "fast" or "normal"
+  end
+  return previous.phase
+end
+
+local function scroll_key_rows(view, win, direction)
+  local count = vim.v.count
+  if count > 0 then
+    view.scroll_key = nil
+    return count
+  end
+
+  local now, previous = vim.uv.hrtime(), view.scroll_key
+  local gap = previous and now - previous.at
+  local repeating = previous
+    and (previous.phase == "fast" or previous.phase == "normal")
+  local timeout = repeating and repeat_idle_ns or repeat_start_ns
+  if
+    not previous
+    or previous.win ~= win
+    or previous.direction ~= direction
+    or gap > timeout
+  then
+    view.scroll_key =
+      { win = win, direction = direction, at = now, phase = "first" }
+    return 1
+  end
+  previous.phase, previous.at = scroll_key_phase(previous, gap), now
+  return previous.phase == "fast" and fast_scroll_rows or 1
+end
+
+local function bind_scroll_keys(view)
+  for key, direction in pairs({ j = 1, k = -1 }) do
+    local native_key = direction > 0 and "<C-e>" or "<C-y>"
+    local native_scroll = vim.keycode(native_key)
+    vim.keymap.set("n", key, function()
+      local win = api.nvim_get_current_win()
+      local rows = scroll_key_rows(view, win, direction)
+      if view.virtual then
+        scroll_virtual(view, win, rows * direction)
+      else
+        vim.cmd.normal({ args = { rows .. native_scroll }, bang = true })
+      end
+    end, { buffer = view.buf, desc = "Scroll PDF" })
+  end
+end
+
 local function virtual_keys(view)
   watch_pointer(view)
   bind_pan(view)
   local function bind(key, step, by_height)
     vim.keymap.set("n", key, function()
+      view.scroll_key = nil
       local win = api.nvim_get_current_win()
       local height = by_height and math.max(1, api.nvim_win_get_height(win) - 2)
         or 1
@@ -1016,8 +1163,6 @@ local function virtual_keys(view)
     end, { buffer = view.buf, desc = "Scroll PDF" })
   end
   for key, step in pairs({
-    j = 1,
-    k = -1,
     ["<Down>"] = 1,
     ["<Up>"] = -1,
     ["<C-e>"] = 1,
@@ -1050,13 +1195,14 @@ local function defer_pdf_detail(view)
       view.zoom_at = nil
       enqueue(view)
     end
-  end, 300)
+  end, 160)
 end
 
 local function zoom(view, change)
   if not view.graphical then
     return
   end
+  view.scroll_key = nil
   local pane = view.virtual and get_pane(view, api.nvim_get_current_win())
     or view
   local target = change and clamp_zoom(pane.zoom + change, view.virtual) or 100
@@ -1084,21 +1230,17 @@ local function start(view, info, err)
   end
   view.graphical = view.dir ~= nil
   view.virtual = view.graphical and graphics.virtual_scroll()
-  if view.virtual then
-    virtual_keys(view)
-    enqueue(view)
-  elseif view.graphical then
-    vim.keymap.set(
-      "n",
-      "j",
-      "<C-e>",
-      { buffer = view.buf, desc = "Scroll down" }
-    )
-    vim.keymap.set("n", "k", "<C-y>", { buffer = view.buf, desc = "Scroll up" })
-    enqueue(view)
-  else
-    use_text(view, reason)
+  if not view.graphical then
+    return use_text(view, reason)
   end
+  bind_scroll_keys(view)
+  if view.virtual then
+    view.detail = detail.new(view.path, view.dir, function()
+      enqueue(view)
+    end)
+    virtual_keys(view)
+  end
+  enqueue(view)
 end
 
 local function current_page(view)
@@ -1114,6 +1256,7 @@ go = function(view, target)
   if not view.info then
     return
   end
+  view.scroll_key = nil
   local page = math.min(math.max(target, 1), view.info.count)
   local win = api.nvim_get_current_win()
   local pane = window_layout(view, win)
@@ -1131,6 +1274,37 @@ go = function(view, target)
   end
 end
 
+local function prompt_page(view)
+  if not view.info then
+    return
+  end
+  local win, count = api.nvim_get_current_win(), view.info.count
+  vim.ui.input(
+    { prompt = ("PDF page (1–%d): "):format(count) },
+    function(input)
+      if
+        not input
+        or view.closed
+        or not api.nvim_win_is_valid(win)
+        or api.nvim_win_get_buf(win) ~= view.buf
+      then
+        return
+      end
+      local page = tonumber(input:match("^%s*(%d+)%s*$"))
+      if not page or page < 1 or page > count then
+        vim.notify(
+          ("Enter a PDF page from 1 to %d."):format(count),
+          vim.log.levels.WARN
+        )
+        return
+      end
+      api.nvim_win_call(win, function()
+        go(view, page)
+      end)
+    end
+  )
+end
+
 local function map_keys(view)
   local function map(lhs, action, desc)
     vim.keymap.set("n", lhs, action, { buffer = view.buf, desc = desc })
@@ -1145,8 +1319,12 @@ local function map_keys(view)
     go(view, 1)
   end, "First PDF page")
   map("G", function()
-    go(view, view.info and view.info.count or 1)
-  end, "Last PDF page")
+    local count = vim.v.count
+    go(view, count > 0 and count or (view.info and view.info.count or 1))
+  end, "Go to PDF page or last page")
+  map("gp", function()
+    prompt_page(view)
+  end, "Go to PDF page by number")
   map("+", function()
     zoom(view, zoom_step * vim.v.count1)
   end, "Zoom in PDF")
@@ -1190,6 +1368,7 @@ local function close(view)
     return
   end
   view.closed = true
+  detail.close(view.detail, view.panes)
   unwatch_pointer(view.buf)
   if view.job then
     view.job:cancel("PDF closed")
@@ -1225,6 +1404,7 @@ local function watch_buffer(view)
     group = view.group,
     buffer = view.buf,
     callback = function()
+      view.scroll_key = nil
       local win = vim.fn.win_findbuf(view.buf)[1]
       local pane = win and window_layout(view, win)
       if pane and pane.pages then
@@ -1252,8 +1432,15 @@ local function watch(view)
   }, {
     group = view.group,
     callback = function(args)
+      if args.event == "WinEnter" then
+        view.scroll_key = nil
+      end
       if args.event == "WinClosed" then
         local win = tonumber(args.match)
+        local pane = view.panes[win]
+        if pane then
+          detail.prune(pane)
+        end
         view.tops[win], view.presented[win], view.panes[win] = nil, nil, nil
         view.repair = true
       end

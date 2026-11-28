@@ -1,9 +1,8 @@
---- Produce Sixel bands off the editor thread. The color converters supply
---- a single shared palette for the whole page, so only gray work is partial.
+--- Encode requested Sixel bands off the editor thread.
 local proc = require("iara.core.proc")
 local data = require("iara.features.pdf.sixel_data")
 local source = debug.getinfo(1, "S").source:sub(2)
-local gray_module = vim.fs.joinpath(vim.fs.dirname(source), "sixel_gray.lua")
+local ppm_module = vim.fs.joinpath(vim.fs.dirname(source), "sixel_ppm.lua")
 local M = {}
 
 local function fast_command(entry)
@@ -103,7 +102,7 @@ local function command(entry, task, fast, done)
   })
 end
 
-local function gray(
+local function encode_ppm(
   module,
   path,
   width,
@@ -139,9 +138,6 @@ local function convert(entry, task, done)
 end
 
 function M.start(entry, task, done, classify)
-  if entry.gray == false then
-    return convert(entry, task, done)
-  end
   local function completed(bands, palette, grayscale)
     if grayscale ~= nil then
       classify(grayscale)
@@ -159,17 +155,17 @@ function M.start(entry, task, done, classify)
       bands = vim.split(bands, "-", { plain = true }),
     }, false)
   end
-  local worker = vim.uv.new_work(gray, vim.schedule_wrap(completed))
+  local worker = vim.uv.new_work(encode_ppm, vim.schedule_wrap(completed))
   local queued = worker
     and worker:queue(
-      gray_module,
+      ppm_module,
       entry.path,
       entry.width,
       entry.height,
       entry.page_width,
       task.first,
       task.last,
-      entry.gray == true,
+      entry.gray,
       entry.offset
     )
   if not queued then

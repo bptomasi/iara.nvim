@@ -237,6 +237,50 @@ T["Find files lists only file names, in rank order"] = function()
   eq(child.lua_get("T.status()"), "2 files ")
 end
 
+local function mock_pdf_preview()
+  child.lua([[
+    local api = vim.api
+    local function noop() end
+    package.loaded["iara.features.pdf.sixel_cache"] = {
+      want = noop, drop = noop, hold = noop, release = noop,
+      prepare = function()
+        return { height = 18, raster = {
+          width = 40, height = 18, palette = "#0;2;100;100;100",
+          bands = { "#0!40~", "#0!40~", "#0!40~" },
+        } }
+      end,
+    }
+    package.loaded["image/utils/term"] = {
+      get_size = function() return { cell_width = 10, cell_height = 18 } end,
+    }
+    api.nvim_ui_send = function() T.pdf_drawn = true end
+    api.nvim_set_decoration_provider = noop
+    local picker = T.picker()
+    local win = picker.preview.win.win
+    local picture = require("iara.features.pdf.sixel").picture(
+      "preview.ppm", win, api.nvim_win_get_buf(win), {
+        x = 1, y = 0, width = 4, height = 1, preview = true,
+      })
+    api.nvim_create_autocmd("TextChangedI", {
+      buffer = picker.input.win.buf, once = true,
+      callback = function()
+        picture:clear()
+        vim.schedule(function() T.pdf_cleared = true end)
+      end,
+    })
+  ]])
+  wait_for("T.pdf_drawn == true")
+end
+
+T["Find files keeps typing in order when clearing a PDF preview"] = function()
+  open({ mode = "files" })
+  mock_pdf_preview()
+  child.type_keys("u")
+  wait_for("T.pdf_cleared == true")
+  child.type_keys("fpr")
+  eq(child.lua_get("T.query_line()"), "ufpr")
+end
+
 T["closing the picker starts the idle collection"] = function()
   child.lua([[package.loaded["iara.features.search.collect"] = {
     start = function() _G.collect_starts = (_G.collect_starts or 0) + 1 end,
