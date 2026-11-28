@@ -485,13 +485,95 @@ graphical["large zoom reuses a native crop during a short scroll"] = function()
     local path = detail_path()
     return path and path ~= first_crop
   end)
-  eq(vim.fn.filereadable(first_crop), 0)
+  eq(vim.fn.filereadable(first_crop), 1)
   local second_crop = detail_path()
   child.type_keys("0")
   wait_drawings(function()
     return #drawings() > 0 and not detail_path()
   end)
+  eq(vim.fn.filereadable(second_crop), 1)
+  child.type_keys("99+")
+  wait_drawings(function()
+    return detail_path() == first_crop
+  end)
+  child.type_keys("q")
+  eq(vim.fn.filereadable(first_crop), 0)
   eq(vim.fn.filereadable(second_crop), 0)
+end
+
+local function second_page_row()
+  return child.lua_get([[(function()
+    local layout = require("iara.features.pdf.layout")
+    local cols = vim.api.nvim_win_get_width(0)
+    local rows = vim.api.nvim_win_get_height(0) - 3
+    local info = { count = 3, ratios = {} }
+    local pages = layout.arrange(info, cols, rows, 600, true)
+    return pages[2].row
+  end)()]])
+end
+
+graphical["high zoom warms the next page before settling there"] = function()
+  child.o.lines = 45
+  child.lua([[
+    require("iara.features.pdf.graphics").virtual_scroll =
+      function() return true end
+  ]])
+  open()
+  wait_drawings(function(items)
+    return #items == 1
+  end)
+  child.type_keys("99+")
+  wait_drawings(detail_path)
+  local current = detail_path()
+  local ahead = vim.fs.joinpath(vim.fs.dirname(current), "detail-2.ppm")
+  local page_two = second_page_row()
+  local near = page_two - child.api.nvim_win_get_height(0) - 3
+  child.type_keys((near - 1) .. "j")
+  eq(
+    vim.wait(1000, function()
+      return vim.fn.filereadable(ahead) == 1
+    end, 10),
+    true
+  )
+  eq(detail_path(), nil)
+  child.type_keys((page_two - near) .. "j")
+  wait_drawings(function()
+    return detail_path() == ahead
+  end)
+end
+
+T["retired PDF crops stay within the byte budget"] = function()
+  local result = child.lua([[
+    local source = require("iara.features.pdf.source")
+    local detail = require("iara.features.pdf.detail")
+    local dir = assert(source.directory())
+    local state = detail.new("input.pdf", dir, function() end)
+    source.crop = function(_, _, prefix, _, done)
+      local path = prefix .. ".ppm"
+      vim.fn.writefile({ "crop" }, path)
+      vim.schedule(function() done(path, nil, 16 * 1024 * 1024) end)
+      return { cancel = function() end }
+    end
+    local pane = {}
+    local slot = { row = 1, width = 100, visible_width = 80, height = 400 }
+    local screen = {
+      top = 1, rows = 30, settled = true,
+      cell = { cell_width = 10, cell_height = 20 },
+    }
+    for page = 1, 2 do
+      detail.picture(state, pane, page, slot, screen)
+      assert(vim.wait(500, function() return state.work == nil end, 5))
+      detail.prune(state, pane)
+    end
+    local counts = {
+      #state.cache, state.bytes, vim.fn.filereadable(dir .. "/detail-1.ppm"),
+      vim.fn.filereadable(dir .. "/detail-2.ppm"),
+    }
+    detail.close(state, { pane })
+    vim.fn.delete(dir, "rf")
+    return counts
+  ]])
+  eq(result, { 1, 16 * 1024 * 1024, 0, 1 })
 end
 
 graphical["quick pairs keep PDF scrolling fast until a pause"] = function()

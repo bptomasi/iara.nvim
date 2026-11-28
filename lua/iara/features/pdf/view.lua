@@ -560,7 +560,7 @@ local function arrange_pane(view, win, size)
     return
   end
   local pages, _, last = layout.arrange(view.info, cols, rows, pane.zoom, true)
-  detail.prune(pane)
+  detail.prune(view.detail, pane)
   local previous = pane.pages or (view.anchor and view.anchor.pages)
   local top = view.tops[win] or (view.anchor and view.anchor.top) or 1
   pane.pages, pane.last_row = pages, last
@@ -778,6 +778,40 @@ local function have_rasters(view, first, last)
   return true
 end
 
+local function prefetch_detail(view, pane, screen, win)
+  local direction = view.detail_direction
+  if
+    not screen
+    or screen.settled
+    or not direction
+    or view.zoom_at
+    or view.scroll_win ~= win
+    or view.detail.work
+  then
+    return
+  end
+  local opposite = direction > 0 and screen.top or screen.top + screen.rows - 2
+  local current = layout.page_at(pane.pages, opposite)
+  local distance = math.max(1, math.floor(screen.rows / 3))
+  local limit = math.max(1, pane.last_row - screen.rows + 1)
+  screen.top = math.max(1, math.min(screen.top + distance * direction, limit))
+  local edge = direction > 0 and screen.top + screen.rows - 2 or screen.top
+  local page = layout.page_at(pane.pages, edge)
+  if page == current or not view.rasters[page] then
+    return
+  end
+  local slot = pane.pages[page]
+  local first, last = geometry.visible(slot, screen)
+  if direction > 0 then
+    last = math.min(slot.height, first + screen.rows)
+  else
+    first = math.max(0, last - screen.rows)
+  end
+  local offset = scrollbar.offset(slot.width, slot.visible_width, pane.pan)
+  local target = vim.tbl_extend("force", slot, { offset = offset })
+  detail.prefetch(view.detail, pane, page, target, screen, first, last)
+end
+
 local function draw_pages(view, win, pane, first, last, top)
   local pictures = view.pictures[win] or {}
   view.pictures[win] = pictures
@@ -792,6 +826,7 @@ local function draw_pages(view, win, pane, first, last, top)
       top = top,
       rows = api.nvim_win_get_height(win) - (pane.bar and 1 or 0),
       cell = { cell_width = view.cell_width, cell_height = view.cell_height },
+      moving = scroll_delay(view) > 0,
       settled = not view.zoom_at and scroll_delay(view) <= 0,
     }
   for page = first, last do
@@ -800,12 +835,13 @@ local function draw_pages(view, win, pane, first, last, top)
       and detail.picture(view.detail, pane, page, slot, screen)
     draw_page(view, win, page, slot, pictures, tile)
   end
+  prefetch_detail(view, pane, screen, win)
 end
 
 local function window_pages(view, win, pane, add)
   local top = topline(view, win)
   local first, last = visible_slots(view, win, pane, top, add)
-  detail.prune(pane, first, last)
+  detail.prune(view.detail, pane, first, last)
   -- Preserve the last complete viewport until all visible pages exist.
   if view.virtual and not have_rasters(view, first, last) then
     return first - 1, last + 1
@@ -904,7 +940,7 @@ local function clear_window_pictures(view, win, pictures)
     or api.nvim_win_get_buf(win) ~= view.buf
     or api.nvim_win_get_tabpage(win) ~= api.nvim_get_current_tabpage()
   then
-    detail.prune(pane)
+    detail.prune(view.detail, pane)
   end
 end
 
@@ -934,8 +970,9 @@ refresh = function(view)
   graphics.refresh()
 end
 
-local function mark_motion(view, win)
+local function mark_motion(view, win, direction)
   view.scroll_win = win
+  view.detail_direction = direction
   view.scrolled_at = vim.uv.now()
   settle_after_scroll(view)
   enqueue(view, true)
@@ -952,7 +989,7 @@ local function scroll_virtual(view, win, rows)
   local target = math.max(1, math.min(top + rows, limit))
   if target ~= top then
     view.tops[win] = target
-    mark_motion(view, win)
+    mark_motion(view, win, target > top and 1 or -1)
   end
 end
 
@@ -1183,9 +1220,11 @@ local function virtual_keys(view)
 end
 
 local function defer_pdf_detail(view)
-  -- Reuse existing rasters during repeated zoom steps. Only ask Poppler for
-  -- extra detail after the input settles, so it cannot evict active encodings.
+  -- Start an isolated zoom sooner. Burst input still waits until the
+  -- scale settles so intermediate detail requests cannot pile up.
   local stamp = vim.uv.hrtime()
+  local burst = view.last_zoom_at and stamp - view.last_zoom_at < 160 * 1e6
+  view.last_zoom_at = stamp
   view.zoom_at = stamp
   if view.job and view.rasters[view.loading] then
     view.job:cancel("PDF zoom changed")
@@ -1195,7 +1234,7 @@ local function defer_pdf_detail(view)
       view.zoom_at = nil
       enqueue(view)
     end
-  end, 160)
+  end, burst and 140 or 70)
 end
 
 local function zoom(view, change)
@@ -1210,6 +1249,7 @@ local function zoom(view, change)
     pane.pan = nil
   end
   if target ~= pane.zoom then
+    view.detail_direction = nil
     pane.zoom_direction = (target >= pane.zoom or target == 100) and 1 or -1
     pane.zoom = target
     if view.virtual then
@@ -1257,6 +1297,7 @@ go = function(view, target)
     return
   end
   view.scroll_key = nil
+  view.detail_direction = nil
   local page = math.min(math.max(target, 1), view.info.count)
   local win = api.nvim_get_current_win()
   local pane = window_layout(view, win)
@@ -1439,7 +1480,7 @@ local function watch(view)
         local win = tonumber(args.match)
         local pane = view.panes[win]
         if pane then
-          detail.prune(pane)
+          detail.prune(view.detail, pane)
         end
         view.tops[win], view.presented[win], view.panes[win] = nil, nil, nil
         view.repair = true

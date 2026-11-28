@@ -23,6 +23,11 @@ function M.visible(slot, screen)
   return math.max(0, start), math.min(slot.height, start + screen.rows)
 end
 
+function M.needs_detail(slot, cell)
+  return math.max(slot.width * cell.cell_width, slot.height * cell.cell_height)
+    > M.raster_limit
+end
+
 function M.detail(slot, screen, first, last)
   local shape = M.pixels(slot, screen.cell)
   local needed = last - first
