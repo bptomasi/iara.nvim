@@ -18,9 +18,7 @@ function M.decode(data)
   local color = "#0"
   for i, band in ipairs(bands) do
     bands[i] = color .. band
-    for selected in band:gmatch("#%d+") do
-      color = selected
-    end
+    color = band:match("^.*(#%d+)") or color
   end
   return {
     width = tonumber(width),

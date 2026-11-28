@@ -4,7 +4,7 @@ local encoder = require("iara.features.pdf.sixel_encode")
 local M = {}
 
 local entries, staged, pending, inflight = {}, {}, {}, {}
-local grayscale = {}
+local sources = {}
 local history = {}
 local history_bytes = 0
 local limit = 8 * 1024 * 1024
@@ -219,9 +219,6 @@ local function bound(entry)
 end
 
 local function store(entry, task, result, full)
-  if not full then
-    grayscale[entry.path] = true
-  end
   if full or not entry.raster then
     entry.raster = {
       width = result.width,
@@ -244,7 +241,14 @@ end
 local function start(task)
   local entry = task.entry
   pending[entry], entry.task, inflight[task] = nil, task, true
-  entry.gray = grayscale[entry.path]
+  local source = sources[entry.path] or {}
+  sources[entry.path] = source
+  entry.gray = source.gray
+  -- The source can be forgotten while its worker finishes. The captured
+  -- table is detached then, so it cannot classify a replacement raster.
+  local function classify(gray)
+    source.gray = gray
+  end
   encoder.start(entry, task, function(result, full)
     inflight[task] = nil
     if not task.cancelled and owns(entry) then
@@ -259,7 +263,7 @@ local function start(task)
       end
     end
     schedule(entry)
-  end)
+  end, classify)
 end
 
 pump = function()
@@ -322,7 +326,7 @@ local function new_entry(path, shape, ready)
 end
 
 function M.forget(path)
-  grayscale[path] = nil
+  sources[path] = nil
   for _, entry in pairs(entries[path] or {}) do
     retire(entry)
   end

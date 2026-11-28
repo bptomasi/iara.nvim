@@ -114,7 +114,7 @@ local function gray(
   known,
   offset
 )
-  local ok, bands, palette = pcall(function()
+  local ok, bands, palette, grayscale = pcall(function()
     return dofile(module)(
       path,
       width,
@@ -126,21 +126,31 @@ local function gray(
       offset
     )
   end)
-  if ok and bands then
-    return bands, palette
+  if ok then
+    return bands or "", palette or "", grayscale
   end
   return "", ""
 end
 
-function M.start(entry, task, done)
+local function convert(entry, task, done)
   local fast = entry.page_width == entry.width
     and vim.fn.executable("img2sixel") == 1
-  local function completed(bands, palette)
+  return command(entry, task, fast, done)
+end
+
+function M.start(entry, task, done, classify)
+  if entry.gray == false then
+    return convert(entry, task, done)
+  end
+  local function completed(bands, palette, grayscale)
+    if grayscale ~= nil then
+      classify(grayscale)
+    end
     if task.cancelled then
       return done()
     end
     if bands == "" then
-      return command(entry, task, fast, done)
+      return convert(entry, task, done)
     end
     done({
       width = entry.width,
@@ -163,7 +173,7 @@ function M.start(entry, task, done)
       entry.offset
     )
   if not queued then
-    command(entry, task, fast, done)
+    convert(entry, task, done)
   end
 end
 

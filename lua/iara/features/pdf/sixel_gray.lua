@@ -1,5 +1,7 @@
 --- Encode Poppler's grayscale PPM pages directly in a libuv worker.
 local ffi = require("ffi")
+ffi.cdef("int memcmp(const void *, const void *, size_t);")
+local memcmp = ffi.C.memcmp
 
 local LEVELS = 64
 local WHITE = LEVELS - 1
@@ -105,6 +107,7 @@ local function paint_band(out, masks, first, last, width)
       repeat_pattern(out, 63, first[gray])
       local base = gray * width
       color_plane(out, masks, base + first[gray], base + last[gray])
+      ffi.fill(masks + base + first[gray], last[gray] - first[gray] + 1)
       first[gray] = width
       last[gray] = -1
     end
@@ -142,6 +145,19 @@ local function palette()
   return table.concat(colors)
 end
 
+local function blank_source_row(image, row)
+  local index = row - image.source_first
+  local seen = image.blank[index]
+  if seen == 0 then
+    local start = index * image.source_width + image.left
+    -- Keep one result per source row since neighboring samples share it.
+    seen = memcmp(image.pixels + start, image.white, #image.white) == 0 and 2
+      or 1
+    image.blank[index] = seen
+  end
+  return seen == 2
+end
+
 local function scan(image, rows)
   local width = image.width
   local masks = ffi.new("uint8_t[?]", width * LEVELS)
@@ -152,9 +168,14 @@ local function scan(image, rows)
   end
   local bands, bytes = {}, 0
   for row = 0, rows - 1, 6 do
-    ffi.fill(masks, width * LEVELS)
     for bit = 0, 5 do
-      sample_row(image, masks, first, last, row + bit, 2 ^ bit)
+      local y = row + bit
+      if
+        not blank_source_row(image, image.rows.lower[y])
+        or not blank_source_row(image, image.rows.upper[y])
+      then
+        sample_row(image, masks, first, last, y, 2 ^ bit)
+      end
     end
     local out = {}
     paint_band(out, masks, first, last, width)
@@ -175,15 +196,20 @@ local function prepare(path, width, height, page_width, span)
   end
   local pixels = ffi.cast("const uint8_t*", rgb)
   if not span.known_gray and not is_gray(pixels, #rgb) then
-    return
+    return nil, false
   end
+  local cols = samples(source_width, page_width, width, span.left, 3)
+  local left, right = cols.lower[0], cols.upper[width - 1]
   return {
+    blank = ffi.new("uint8_t[?]", #rgb / (source_width * 3)),
+    left = left,
+    white = ("\255"):rep(right - left + 1),
     bytes = rgb, -- Keep the string alive while sampling its bytes via FFI.
     pixels = pixels,
     source_width = source_width * 3,
     source_first = first,
     width = width,
-    cols = samples(source_width, page_width, width, span.left, 3),
+    cols = cols,
     rows = samples(source_height, height, span.rows, span.offset, 1),
   }
 end
@@ -217,8 +243,10 @@ return function(
   if width * span.rows > 12 * 1024 * 1024 then
     return
   end
-  local image = prepare(path, width, height, page_width, span)
+  local image, grayscale = prepare(path, width, height, page_width, span)
   if image then
-    return scan(image, span.rows), palette()
+    local bands = scan(image, span.rows)
+    return bands, bands and palette(), true
   end
+  return nil, nil, grayscale
 end

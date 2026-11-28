@@ -448,6 +448,9 @@ graphical["the thumb tracks input while a crop finishes"] = function()
     function() return true end]])
   open()
   local win = child.api.nvim_get_current_win()
+  wait_drawings(function(items)
+    return #items > 0
+  end)
   child.type_keys("99+")
   wait_drawings(function()
     return drawing_in(win) and drawing_in(win).scrollbar
@@ -641,16 +644,23 @@ T["Sixel clears the terminal grid before painting after a split"] = function()
   eq(events[2]:find("\27P0;1;0q", 1, true) ~= nil, true)
 end
 
-T["Sixel encodes gray PPM and sends color to the converter"] = function()
-  local dir = vim.fs.dirname(file)
+local function prepare_sixel_sources(dir)
   executable(
     dir .. "/img2sixel",
-    [[printf '\033P0;0;0q"1;1;2;6#0;2;100;0;0#0~~\033\\']]
+    [[
+printf '\033P0;0;0q"1;1;%s;%s#0;2;100;0;0#0!%s~\033\\' "$2" "$4" "$2"
+]]
   )
   child.lua(
     [[
     local dir = ...
     local cache = require("iara.features.pdf.sixel_cache")
+    local new_work = vim.uv.new_work
+    _G.probes = 0
+    vim.uv.new_work = function(...)
+      _G.probes = _G.probes + 1
+      return new_work(...)
+    end
     local function picture(name, first_pixel)
       local path = dir .. "/" .. name .. ".ppm"
       local f = assert(io.open(path, "wb"))
@@ -664,6 +674,10 @@ T["Sixel encodes gray PPM and sends color to the converter"] = function()
   ]],
     { dir }
   )
+end
+
+T["Sixel encodes grayscale and reuses color detection"] = function()
+  prepare_sixel_sources(vim.fs.dirname(file))
   eq(
     vim.wait(5000, function()
       return child.lua_get("_G.gray.raster ~= nil and _G.color.raster ~= nil")
@@ -672,6 +686,19 @@ T["Sixel encodes gray PPM and sends color to the converter"] = function()
   )
   eq(child.lua_get("_G.gray.raster.bands"), { "#63!2~$#0~" })
   eq(child.lua_get("_G.color.raster.palette"), "#0;2;100;0;0")
+  eq(child.lua_get("_G.probes"), 2)
+  child.lua([[
+    local cache = require("iara.features.pdf.sixel_cache")
+    local shape = { width = 3, height = 6, page_width = 3 }
+    _G.second_crop = cache.warm(_G.color.path, shape, 1, function() end)
+  ]])
+  eq(
+    vim.wait(5000, function()
+      return child.lua_get("_G.second_crop.raster ~= nil")
+    end, 20),
+    true
+  )
+  eq(child.lua_get("_G.probes"), 2)
 end
 
 local function mock_scroll_compositor(cell_height)
@@ -838,6 +865,20 @@ T["partial Sixel bands match the same portion of a whole page"] = function()
   local full = vim.split(assert(render(path, 4, 60, 4)), "-", { plain = true })
   local partial = render(path, 4, 60, 4, 4, 7, true)
   eq(partial, table.concat(full, "-", 4, 7))
+end
+
+T["blank bands separate ink without carrying pixel masks"] = function()
+  local path = file .. ".ppm"
+  local ppm = assert(io.open(path, "wb"))
+  local white = "\255\255\255"
+  ppm:write("P6\n2 18\n255\n")
+  for row = 0, 17 do
+    local first = (row < 6 or row == 14) and "\0\0\0" or white
+    ppm:write(first, white)
+  end
+  ppm:close()
+  local render = require("iara.features.pdf.sixel_gray")
+  eq((render(path, 2, 18, 2)), "#63!2~$#0~-#63!2~-#63!2~$#0C")
 end
 
 T["Sixel slices retain colors and stay within viewport"] = function()
