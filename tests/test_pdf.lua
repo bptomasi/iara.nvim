@@ -123,6 +123,22 @@ T["jumps to a numbered text page by prompt or count"] = function()
   eq(vim.fn.readfile(log), { "1", "2", "3", "2" })
 end
 
+T["a numeric command jumps to a page only in a PDF buffer"] = function()
+  open()
+  wait_page(1)
+  child.type_keys(":2<CR>")
+  wait_page(2)
+  child.type_keys(":3<Esc>")
+  child.type_keys(":2,3<CR>")
+  eq(child.api.nvim_win_get_cursor(0)[1], 3)
+  eq(vim.fn.readfile(log), { "1", "2" })
+
+  child.cmd("enew")
+  child.api.nvim_buf_set_lines(0, 0, -1, false, { "one", "two", "three" })
+  child.type_keys(":2<CR>")
+  eq(child.api.nvim_win_get_cursor(0)[1], 2)
+end
+
 local function mock_poppler()
   executable(
     vim.fs.dirname(file) .. "/pdftoppm",
@@ -205,7 +221,7 @@ end
 local graphical = MiniTest.new_set({ hooks = { pre_case = mock_graphics } })
 T["graphics"] = graphical
 
-graphical["the page prompt targets the original PDF split"] = function()
+graphical["page jumps target the originating PDF split"] = function()
   child.lua([[require("iara.features.pdf.graphics").virtual_scroll =
     function() return true end]])
   open()
@@ -226,6 +242,11 @@ graphical["the page prompt targets the original PDF split"] = function()
     return child.lua_get("vim.w[...].iara_pdf_page", { origin }) == " 3/3 "
   end)
   eq(child.lua_get("vim.w.iara_pdf_page"), " 1/3 ")
+  child.type_keys(":2<CR>")
+  wait_drawings(function()
+    return child.lua_get("vim.w.iara_pdf_page") == " 2/3 "
+  end)
+  eq(child.lua_get("vim.w[...].iara_pdf_page", { origin }), " 3/3 ")
 end
 
 graphical["reuses page one and batches adjacent pages while idle"] = function()

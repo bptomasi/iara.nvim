@@ -46,7 +46,7 @@ end
 local function show_text(view, body)
   local header = view.name
   if view.info then
-    header = ("%s  ·  %d/%d  ·  j/k page  ·  gp go to  ·  q close"):format(
+    header = ("%s  ·  %d/%d  ·  j/k page  ·  :N go to  ·  q close"):format(
       header,
       view.page,
       view.info.count
@@ -1315,6 +1315,32 @@ go = function(view, target)
   end
 end
 
+local function go_to_number(view, win, page)
+  if
+    view.closed
+    or not view.info
+    or not api.nvim_win_is_valid(win)
+    or api.nvim_win_get_buf(win) ~= view.buf
+  then
+    return
+  end
+  local count = view.info.count
+  if not page or page < 1 or page > count then
+    vim.notify(
+      ("Enter a PDF page from 1 to %d."):format(count),
+      vim.log.levels.WARN
+    )
+    return
+  end
+  api.nvim_win_call(win, function()
+    go(view, page)
+  end)
+end
+
+local function page_number(input)
+  return tonumber(input:match("^%s*(%d+)%s*$"))
+end
+
 local function prompt_page(view)
   if not view.info then
     return
@@ -1323,27 +1349,33 @@ local function prompt_page(view)
   vim.ui.input(
     { prompt = ("PDF page (1–%d): "):format(count) },
     function(input)
-      if
-        not input
-        or view.closed
-        or not api.nvim_win_is_valid(win)
-        or api.nvim_win_get_buf(win) ~= view.buf
-      then
-        return
+      if input then
+        go_to_number(view, win, page_number(input))
       end
-      local page = tonumber(input:match("^%s*(%d+)%s*$"))
-      if not page or page < 1 or page > count then
-        vim.notify(
-          ("Enter a PDF page from 1 to %d."):format(count),
-          vim.log.levels.WARN
-        )
-        return
-      end
-      api.nvim_win_call(win, function()
-        go(view, page)
-      end)
     end
   )
+end
+
+local function watch_page_address(view)
+  api.nvim_create_autocmd("CmdlineLeave", {
+    group = view.group,
+    buffer = view.buf,
+    callback = function(args)
+      if args.match ~= ":" or vim.v.event.abort then
+        return
+      end
+      local page = page_number(vim.fn.getcmdline())
+      if not page then
+        return
+      end
+      local win = api.nvim_get_current_win()
+      -- Consume the Ex address and jump once the command line has closed.
+      vim.cmd("let v:event.abort = v:true")
+      vim.schedule(function()
+        go_to_number(view, win, page)
+      end)
+    end,
+  })
 end
 
 local function map_keys(view)
@@ -1463,6 +1495,7 @@ end
 local function watch(view)
   view.group = api.nvim_create_augroup("IaraPDF" .. view.buf, { clear = true })
   watch_buffer(view)
+  watch_page_address(view)
   api.nvim_create_autocmd({
     "WinResized",
     "WinScrolled",

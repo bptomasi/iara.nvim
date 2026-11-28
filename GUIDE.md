@@ -567,8 +567,9 @@ press to scroll four lines per repeat once the repeats start. Holding
 one key from the first press uses one line per repeat. The faster speed
 resets after a pause or direction change.
 Use `]p` and `[p` to jump by page, `gg` and `G` to jump to either end,
-and `q` to close the viewer. Press `gp` to enter a page number or type
-`42G` to jump straight to page 42. The page counter stays in the statusline.
+and `q` to close the viewer. Type `:42<Enter>` or `42G` to jump straight
+to page 42, or press `gp` to open the page prompt.
+The page counter stays in the statusline.
 Use `+` and `-` to zoom and `0` to restore the original fit. Zoom
 keeps the same reading position. On Foot, each split has its own zoom
 level up to 600%, and the page is clipped to that split's bounds.
