@@ -6,6 +6,7 @@ local M = {}
 local FRAME_MS = 25
 local namespace = vim.api.nvim_create_namespace("iara.start.motion")
 local active
+local cover
 
 ---Stop playback and reveal the static wave.
 function M.stop()
@@ -76,7 +77,7 @@ local function waiting_for_input()
 end
 
 local function tick(animation)
-  if not paint(animation) or not waiting_for_input() then
+  if animation.paused or not paint(animation) or not waiting_for_input() then
     return
   end
   -- A nested input wait or the command line can keep changed extmarks
@@ -85,6 +86,44 @@ local function tick(animation)
     vim.api.nvim__redraw({ buf = animation.buf, valid = true, flush = true })
   else
     vim.cmd.redraw()
+  end
+end
+
+local function covered(animation)
+  local win = cover and vim.fn.bufwinid(animation.buf)
+  if not win or win == -1 then
+    return false
+  end
+  local row, col = unpack(vim.fn.win_screenpos(win))
+  local bottom = row + vim.api.nvim_win_get_height(win)
+  local right = col + vim.api.nvim_win_get_width(win)
+  for _, rect in ipairs(cover) do
+    if
+      rect.row < bottom
+      and rect.row + rect.rows > row
+      and rect.col < right
+      and rect.col + rect.cols > col
+    then
+      return true
+    end
+  end
+  return false
+end
+
+local function sync_timer(animation)
+  animation.paused = covered(animation)
+  if animation.paused then
+    animation.timer:stop()
+  elseif not animation.timer:is_active() then
+    animation.timer:start(FRAME_MS, FRAME_MS, animation.tick)
+  end
+end
+
+---Avoid updating extmarks under a terminal graphic that covers this window.
+function M.set_cover(rectangles)
+  cover = rectangles
+  if active then
+    sync_timer(active)
   end
 end
 
@@ -113,16 +152,13 @@ function M.play(buf, row, col, count, render)
     ids = {},
     timer = timer,
   }
+  animation.tick = vim.schedule_wrap(function()
+    tick(animation)
+  end)
   active = animation
   timer:unref()
   paint(animation)
-  timer:start(
-    FRAME_MS,
-    FRAME_MS,
-    vim.schedule_wrap(function()
-      tick(animation)
-    end)
-  )
+  sync_timer(animation)
 end
 
 return M

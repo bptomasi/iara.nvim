@@ -29,17 +29,26 @@ function M.decode(data)
   }
 end
 
-function M.slice(raster, skip, height)
+function M.bounds(page_height, skip, height)
   -- Round the top down by at most five pixels. Limit the bottom to
   -- complete bands so the terminal cannot paint across a window border.
   local first = math.floor(skip / 6) + 1
-  local last = math.min(
-    first + math.floor(height / 6) - 1,
-    math.ceil(raster.height / 6),
-    #raster.bands
-  )
-  if last < first then
-    return nil
+  local last =
+    math.min(first + math.floor(height / 6) - 1, math.ceil(page_height / 6))
+  if last >= first then
+    return first, last
+  end
+end
+
+function M.slice(raster, skip, height)
+  local first, last = M.bounds(raster.height, skip, height)
+  if not first then
+    return
+  end
+  for band = first, last do
+    if not raster.bands[band] then
+      return
+    end
   end
   local pixels = (last - first + 1) * 6
   return ('\27P0;1;0q"1;1;%d;%d%s%s\27\\'):format(

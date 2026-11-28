@@ -69,26 +69,60 @@ function M.directory()
   return vim.uv.fs_mkdtemp(vim.fn.tempname() .. "-pdf-XXXXXX")
 end
 
-function M.raster(path, page, prefix, size, callback, format)
-  local number = tostring(page)
-  local ppm = format == "ppm"
-  local output_path = prefix .. (ppm and ".ppm" or ".png")
-  local argv = { "pdftoppm", "-f", number, "-l", number }
-  if not ppm then
+local function raster_command(path, first, last, prefix, size, format)
+  local argv = { "pdftoppm", "-f", tostring(first), "-l", tostring(last) }
+  if format ~= "ppm" then
     argv[#argv + 1] = "-png"
   end
-  vim.list_extend(
-    argv,
-    { "-singlefile", "-scale-to", tostring(size), path, prefix }
-  )
-  local options = { timeout = 15000, stdout = { mode = "discard" } }
-  return run(path, argv, options, function(output, err)
+  if first == last then
+    argv[#argv + 1] = "-singlefile"
+  end
+  return vim.list_extend(argv, { "-scale-to", tostring(size), path, prefix })
+end
+
+local raster_options = { timeout = 15000, stdout = { mode = "discard" } }
+
+function M.raster(path, page, prefix, size, callback, format)
+  local output_path = prefix .. (format == "ppm" and ".ppm" or ".png")
+  local argv = raster_command(path, page, page, prefix, size, format)
+  return run(path, argv, raster_options, function(output, err)
     local info = output and vim.uv.fs_stat(output_path)
     if info then
       return callback(output_path, nil, info.size)
     end
     vim.uv.fs_unlink(output_path)
     callback(nil, err or (output and "Could not rasterize PDF page."))
+  end)
+end
+
+local function batch_files(dir, first, last, format)
+  local pages = {}
+  local files = vim.uv.fs_scandir(dir)
+  if not files then
+    return pages
+  end
+  while true do
+    local name = vim.uv.fs_scandir_next(files)
+    if not name then
+      break
+    end
+    local page = tonumber(name:match("^page%-(%d+)%." .. format .. "$"))
+    if page and page >= first and page <= last then
+      local file = dir .. "/" .. name
+      local stat = vim.uv.fs_stat(file)
+      if stat then
+        pages[page] = { path = file, bytes = stat.size }
+      end
+    end
+  end
+  return pages
+end
+
+---Read only the numbered outputs from this job's own temporary directory.
+function M.batch(path, first, last, dir, size, format, callback)
+  local argv = raster_command(path, first, last, dir .. "/page", size, format)
+  return run(path, argv, raster_options, function(output)
+    callback(output and batch_files(dir, first, last, format) or {})
   end)
 end
 

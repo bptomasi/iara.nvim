@@ -104,7 +104,7 @@ T["the file picker opens PDFs and page changes cancel renders"] = function()
   eq(vim.fn.readfile(log), { "1", "2", "3" })
 end
 
-local function mock_graphics()
+local function mock_poppler()
   executable(
     vim.fs.dirname(file) .. "/pdftoppm",
     [[
@@ -113,24 +113,42 @@ if [ "$5" = "-png" ]; then format=png; fi
 prefix=
 for arg do path=$prefix; prefix=$arg; done
 test "$path" = "$IARA_TEST_PDF"
-printf '%s' "$2" >"$prefix.$format"
+printf '%s %s\n' "$2" "$4" >>"$(dirname "$path")/renders.log"
+if [ "$2" = "$4" ]; then
+  printf '%s' "$2" >"$prefix.$format"
+else
+  if [ "${IARA_TEST_PDF_SLOW_BATCH:-}" = yes ]; then sleep 5; fi
+  for page in $(seq "$2" "$4"); do
+    printf '%s' "$page" >"$prefix-$page.$format"
+  done
+fi
 ]]
   )
+end
+
+local function mock_graphics()
+  mock_poppler()
   child.lua([[
     local graphics = require("iara.features.pdf.graphics")
     graphics.available = function() return true end
     graphics.size = function()
       return { cell_height = 20, cell_width = 10 }
     end
-    _G.drawings, _G.preview_tops = {}, {}
+    _G.drawings, _G.preview_tops, _G.paint_controls = {}, {}, {}
     graphics.picture = function(path, win, _, rect)
       local key = ("%d:%s"):format(win, vim.fs.basename(path))
       _G.drawings[key] = {
-        path = path, win = win, rect = { x = rect.x, width = rect.width },
+        path = path, win = win, rect = {
+          x = rect.x, width = rect.width, visible = rect.visible_width,
+          offset = rect.offset,
+          scrollbar = rect.scrollbar and rect.scrollbar(),
+        },
       }
       _G.preview_tops[key] = rect.topline
+      _G.paint_controls[key] = { bar = rect.scrollbar, ready = rect.on_ready }
       return { clear = function()
         _G.drawings[key], _G.preview_tops[key] = nil, nil
+        _G.paint_controls[key] = nil
       end }
     end
     vim.o.laststatus = 3
@@ -152,6 +170,64 @@ end
 
 local graphical = MiniTest.new_set({ hooks = { pre_case = mock_graphics } })
 T["graphics"] = graphical
+
+graphical["reuses page one and batches adjacent pages while idle"] = function()
+  child.lua(
+    [[
+    local path = ...
+    local cache = require("iara.features.pdf.raster_cache")
+    local dir = require("iara.features.pdf.source").directory()
+    local first = dir .. "/thumb.png"
+    vim.fn.writefile({"cached"}, first)
+    local key = cache.identity(path, "png")
+    cache.release(cache.remember(key, dir, first, 2048, 7))
+  ]],
+    { file }
+  )
+  open()
+  wait_drawings(function(items)
+    return #items == 1
+  end)
+  eq(vim.fn.readfile(drawings()[1].path), { "cached" })
+  local renders = vim.fs.dirname(file) .. "/renders.log"
+  eq(
+    vim.wait(3000, function()
+      return vim.fn.filereadable(renders) == 1
+    end, 20),
+    true
+  )
+  eq(vim.fn.readfile(renders), { "2 3" })
+  child.type_keys("q")
+  helpers.write_file(file, "%PDF changed")
+  open()
+  wait_drawings(function(items)
+    return #items == 1
+  end)
+  eq(vim.fn.readfile(drawings()[1].path), { "1" })
+  eq(vim.fn.readfile(renders)[2], "1 1")
+end
+
+graphical["a visible page supersedes a running Poppler batch"] = function()
+  child.lua([[vim.env.IARA_TEST_PDF_SLOW_BATCH = "yes"]])
+  open()
+  local renders = vim.fs.dirname(file) .. "/renders.log"
+  eq(
+    vim.wait(3000, function()
+      return vim.fn.filereadable(renders) == 1 and #vim.fn.readfile(renders) > 1
+    end, 20),
+    true
+  )
+  eq(vim.fn.readfile(renders), { "1 1", "2 3" })
+  child.type_keys("]p")
+  wait_drawings(function(items)
+    for _, item in ipairs(items) do
+      if vim.fs.basename(item.path):match("^page%-2%-") then
+        return true
+      end
+    end
+  end)
+  eq(vim.fn.readfile(renders)[3], "2 2")
+end
 
 graphical["scrolls across pages and reuses rasters"] = function()
   open()
@@ -237,7 +313,12 @@ graphical["Sixel scroll and zoom leave the editor grid still"] = function()
   end)
   local width = drawings()[1].rect.width
   child.type_keys("4j")
-  eq(child.lua_get("pdf_top()"), 5)
+  eq(
+    vim.wait(1000, function()
+      return child.lua_get("pdf_top()") == 5
+    end, 10),
+    true
+  )
   eq(child.fn.line("w0"), 1)
   eq(child.api.nvim_buf_line_count(0), 1)
   child.type_keys("+")
@@ -253,12 +334,157 @@ graphical["Sixel scroll and zoom leave the editor grid still"] = function()
   eq(child.fn.line("w0"), 1)
 end
 
-T["Sixel restores an unchanged image after window redraw"] = function()
+local function wait_frames(count)
+  eq(
+    vim.wait(1000, function()
+      return child.lua_get("_G.frames") == count
+    end, 10),
+    true
+  )
+end
+
+local function split_sizes()
+  local widths = {}
+  for _, drawing in ipairs(drawings()) do
+    widths[drawing.win] = drawing.rect.width
+  end
+  return widths
+end
+
+graphical["PDF zoom and its limits belong to the focused split"] = function()
+  child.lua([[require("iara.features.pdf.graphics").virtual_scroll =
+    function() return true end]])
+  open()
+  child.cmd("rightbelow vsplit")
+  child.cmd("aboveleft split")
+  wait_drawings(function(items)
+    return #items == 3
+  end)
+  local focus = child.api.nvim_get_current_win()
+  local base = split_sizes()
+  local other = next(base, focus) or next(base)
+  child.type_keys("99+")
+  wait_drawings(function(items)
+    return #items >= 2 and split_sizes()[focus] > base[focus]
+  end)
+  local maximum = split_sizes()[focus]
+  eq(maximum <= 6 * child.api.nvim_win_get_width(focus), true)
+  eq(maximum > 3 * base[focus], true)
+  for _, drawing in ipairs(drawings()) do
+    local width = child.api.nvim_win_get_width(drawing.win)
+    eq(drawing.rect.x + drawing.rect.visible <= width, true)
+  end
+  eq(split_sizes()[other], base[other])
+  child.type_keys("99+")
+  eq(split_sizes()[focus], maximum)
+  child.api.nvim_set_current_win(other)
+  child.type_keys("2-")
+  wait_drawings(function(items)
+    return #items >= 2 and split_sizes()[other] < base[other]
+  end)
+  eq(split_sizes()[focus], maximum)
+  child.type_keys("0")
+  wait_drawings(function(items)
+    return #items >= 2 and split_sizes()[other] == base[other]
+  end)
+  eq(split_sizes()[focus], maximum)
+end
+
+local function drawing_in(win)
+  for _, drawing in ipairs(drawings()) do
+    if drawing.win == win then
+      return drawing.rect
+    end
+  end
+end
+
+graphical["the thumb tracks input while a crop finishes"] = function()
+  child.lua([[require("iara.features.pdf.graphics").virtual_scroll =
+    function() return true end]])
+  open()
+  local win = child.api.nvim_get_current_win()
+  child.type_keys("99+")
+  wait_drawings(function()
+    return drawing_in(win) and drawing_in(win).scrollbar
+  end)
+  local offset = drawing_in(win).offset
+  child.lua([[require("iara.features.pdf.graphics").ready =
+    function() return false end]])
+  child.type_keys("999h")
+  eq(
+    vim.wait(1000, function()
+      return child.lua_get([[select(2, next(_G.paint_controls)).bar().start]])
+        == 0
+    end, 10),
+    true
+  )
+  eq(drawing_in(win).offset, offset)
+  child.lua([[
+    require("iara.features.pdf.graphics").ready = function() return true end
+    select(2, next(_G.paint_controls)).ready()
+  ]])
+  wait_drawings(function()
+    return drawing_in(win).offset == 0
+  end)
+end
+
+graphical["h and l pan only the zoomed split within page bounds"] = function()
+  child.lua([[require("iara.features.pdf.graphics").virtual_scroll =
+    function() return true end]])
+  open()
+  child.cmd("vsplit")
+  wait_drawings(function(items)
+    return #items == 2
+  end)
+  local win = child.api.nvim_get_current_win()
+  child.type_keys("99+")
+  wait_drawings(function()
+    return drawing_in(win) and drawing_in(win).scrollbar
+  end)
+  local extended = drawing_in(win)
+  eq(extended.offset > 0, true)
+  child.type_keys("999h")
+  wait_drawings(function()
+    return drawing_in(win).offset == 0
+  end)
+  child.type_keys("999l")
+  wait_drawings(function()
+    return drawing_in(win).offset == extended.width - extended.visible
+  end)
+  for _, drawing in ipairs(drawings()) do
+    if drawing.win ~= win then
+      eq(drawing.rect.offset, 0)
+      eq(drawing.rect.scrollbar, nil)
+    end
+  end
+  child.type_keys("0")
+  wait_drawings(function()
+    return drawing_in(win) and not drawing_in(win).scrollbar
+  end)
+end
+
+T["scrollbar drag keeps its grab point and clamps"] = function()
+  local scrollbar = require("iara.features.pdf.scrollbar")
+  local track = scrollbar.track({ width = 100, visible_width = 40 }, 42, 0.5)
+  eq({ track.x, track.start, track.thumb }, { 1, 12, 16 })
+  eq(scrollbar.offset(100, 40, 0.5), 30)
+  local grab, held = scrollbar.drag_offset(track, 17)
+  eq({ grab, held }, { 3, true })
+  eq(scrollbar.position(track, 17, grab), 0.5)
+  eq(scrollbar.position(track, -10, grab), 0)
+  eq(scrollbar.position(track, 90, grab), 1)
+  eq(scrollbar.track({ width = 40, visible_width = 40 }, 42), nil)
+end
+
+T["Sixel repairs preview damage outside its window redraw"] = function()
   child.lua([[
     package.loaded["iara.features.pdf.sixel_cache"] = {
-      prepare = function(_, width, height)
-        return { raster = {
-          width = width, height = height,
+      want = function() end, drop = function() end,
+      hold = function() end, release = function() end,
+      prepare = function(_, shape)
+        local height = shape.height
+        return { height = height, raster = {
+          width = shape.width, height = height,
           palette = "#0;2;100;100;100",
           bands = vim.split(("#0~ "):rep(height / 6), " ", {
             trimempty = true,
@@ -275,30 +501,32 @@ T["Sixel restores an unchanged image after window redraw"] = function()
       _G.provider = provider
     end
     _G.sixel = require("iara.features.pdf.sixel")
-    local api = vim.api
-    local win, buf = api.nvim_get_current_win(), api.nvim_get_current_buf()
-    _G.sixel.picture("fake", win, buf, {
-      x = 1, y = 0, width = 4, height = 3,
+    local win = vim.api.nvim_get_current_win()
+    _G.sixel.picture("fake", win, 1, {
+      x = 1, y = 0, width = 4, height = 3, preview = true,
     })
   ]])
   eq(child.lua_get("_G.frames"), 1)
-  child.lua("_G.sixel.refresh()")
+  child.lua("for _ = 1, 3 do _G.provider.on_end() end")
   eq(child.lua_get("_G.frames"), 1)
+  wait_frames(2)
   child.lua([[
     _G.provider.on_win(nil, vim.api.nvim_get_current_win())
     _G.provider.on_end()
   ]])
-  eq(child.lua_get("_G.frames"), 2)
+  eq(child.lua_get("_G.frames"), 3)
 end
 
-T["Sixel keeps the frame while a visible page is pending"] = function()
+T["Sixel keeps the frame while the next page is pending"] = function()
   child.lua([[
-    local api = vim.api
+    local win = vim.api.nvim_get_current_win()
     local raster = { width = 40, height = 18,
       palette = "#0;2;100;100;100", bands = { "#0~", "#0~", "#0~" } }
-    local waiting, complete = {}, { raster = raster }
+    local waiting, complete = { height = 18 }, { height = 18, raster = raster }
     package.loaded["iara.features.pdf.sixel_cache"] = {
-      prepare = function(path, _, _, ready)
+      want = function() end, drop = function() end,
+      hold = function() end, release = function() end,
+      prepare = function(path, _, ready)
         if path == "pending" then
           _G.complete = function()
             waiting.raster = raster
@@ -312,19 +540,17 @@ T["Sixel keeps the frame while a visible page is pending"] = function()
     package.loaded["image/utils/term"] = {
       get_size = function() return { cell_width = 10, cell_height = 18 } end,
     }
-    api.nvim_ui_send = function() _G.frames = (_G.frames or 0) + 1 end
-    api.nvim_set_decoration_provider = function() end
-    local sixel = require("iara.features.pdf.sixel")
+    vim.api.nvim_ui_send = function() _G.frames = (_G.frames or 0) + 1 end
+    vim.api.nvim_set_decoration_provider = function() end
     local function picture(path, y)
-      return sixel.picture(path, api.nvim_get_current_win(), 1, {
-        x = 1, y = y, width = 4, height = 1,
-      })
+      local rect = { x = 1, y = y, width = 4, height = 1 }
+      return require("iara.features.pdf.sixel").picture(path, win, 1, rect)
     end
     local before = picture("before", 0)
     vim.schedule(function()
       before.clear()
-      picture("pending", 0)
-      picture("ready", 2)
+      picture("ready", 0)
+      picture("pending", 2)
     end)
   ]])
   eq(child.lua_get("_G.frames"), 1)
@@ -336,8 +562,10 @@ T["Sixel clears the terminal grid before painting after a split"] = function()
   child.lua([[
     local api = vim.api
     package.loaded["iara.features.pdf.sixel_cache"] = {
+      want = function() end, drop = function() end,
+      hold = function() end, release = function() end,
       prepare = function()
-        return { raster = { width = 40, height = 18,
+        return { height = 18, raster = { width = 40, height = 18,
           palette = "#0;2;100;100;100", bands = { "#0~", "#0~", "#0~" } } }
       end,
     }
@@ -383,7 +611,8 @@ T["Sixel encodes gray PPM and sends color to the converter"] = function()
       local f = assert(io.open(path, "wb"))
       f:write("P6\n2 1\n255\n", first_pixel, "\255\255\255")
       f:close()
-      return cache.prepare(path, 2, 6, function() end, true)
+      local shape = { width = 2, height = 6, page_width = 2 }
+      return cache.warm(path, shape, 1, function() end)
     end
     _G.gray = picture("gray", "\0\0\0")
     _G.color = picture("color", "\255\0\0")
@@ -404,12 +633,55 @@ T["Sixel enlarges the page and encodes only the center columns"] = function()
   local path = file .. ".ppm"
   local ppm = assert(io.open(path, "wb"))
   local black, white = "\0\0\0", "\255\255\255"
-  ppm:write("P6\n4 1\n255\n", black, white, black, white)
+  ppm:write("P6\n4 1\n255\n", black, white, black, black)
   ppm:close()
 
   local render = require("iara.features.pdf.sixel_gray")
   local bands = render(path, 2, 6, 4)
   eq(bands, "#63!2~$#0?~")
+  eq((render(path, 2, 6, 4, 1, 1, false, 0)), "#63!2~$#0~")
+  eq((render(path, 2, 6, 4, 1, 1, false, 2)), "#63!2~$#0~~")
+end
+
+T["Sixel starts the current zoom while two superseded jobs drain"] = function()
+  child.lua([[
+    _G.jobs = {}
+    package.loaded["iara.features.pdf.sixel_encode"] = {
+      start = function(entry, task)
+        _G.jobs[#_G.jobs + 1] = { entry.path, task.first, task.last }
+      end,
+    }
+    local cache = require("iara.features.pdf.sixel_cache")
+    _G.cache = cache
+    _G.request = function(path)
+      local shape = { width = 720, height = 2400, page_width = 720 }
+      local entry = cache.prepare(path, shape, function() end)
+      cache.want(entry, path, 150, 240, true)
+    end
+    _G.request("old-a")
+    _G.request("old-b")
+  ]])
+  eq(child.lua_get("#_G.jobs"), 2)
+  child.lua([[
+    _G.cache.forget("old-a")
+    _G.cache.forget("old-b")
+    _G.request("current")
+  ]])
+  eq(child.lua_get("_G.jobs[3]"), { "current", 150, 240 })
+end
+
+T["partial Sixel bands match the same portion of a whole page"] = function()
+  local path = file .. ".ppm"
+  local ppm = assert(io.open(path, "wb"))
+  ppm:write("P6\n1 24\n255\n")
+  for row = 0, 23 do
+    ppm:write(string.char(row * 11):rep(3))
+  end
+  ppm:close()
+  local render = require("iara.features.pdf.sixel_gray")
+  local full = vim.split(assert(render(path, 4, 60, 4)), "-", { plain = true })
+  local partial = render(path, 4, 60, 4, 4, 7, true)
+  eq(partial, table.concat(full, "-", 4, 7))
 end
 
 T["Sixel slices retain colors and stay within viewport"] = function()

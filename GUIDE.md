@@ -565,8 +565,10 @@ Scroll continuously with the mouse wheel, `j`, `k`, `Ctrl-d`, or `Ctrl-u`.
 Use `]p` and `[p` to jump by page, `gg` and `G` to jump to either end,
 and `q` to close the viewer. The page counter stays in the statusline.
 Use `+` and `-` to zoom and `0` to restore the original fit. Zoom
-keeps the same reading position. On Foot, high zoom levels show the
-center of the page, clipped to the split width.
+keeps the same reading position. On Foot, each split has its own zoom
+level up to 600%, and the page is clipped to that split's bounds.
+When the page extends past the sides, drag or click its bottom scrollbar,
+use `h` and `l`, or scroll horizontally with the mouse.
 
 The file picker previews the first page. Graphical viewing uses Poppler
 (`pdfinfo` and `pdftoppm`), ImageMagick, and a compatible terminal. Foot

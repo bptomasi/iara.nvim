@@ -8,7 +8,19 @@ local MAX_BYTES = 8 * 1024 * 1024
 local floor = math.floor
 local char = string.char
 
-local function read_ppm(path)
+local function sample_at(from, ratio, position)
+  local at = (position + 0.5) * ratio - 0.5
+  return math.max(0, math.min(from - 1, at))
+end
+
+local function source_rows(height, target, span)
+  local ratio = height / target
+  local first = floor(sample_at(height, ratio, span.offset))
+  local last = sample_at(height, ratio, span.offset + span.rows - 1)
+  return first, math.min(height - 1, floor(last) + 1)
+end
+
+local function read_ppm(path, target, span)
   local file = io.open(path, "rb")
   if not file then
     return
@@ -24,39 +36,40 @@ local function read_ppm(path)
     file:close()
     return
   end
-  local rgb = file:read(width * height * 3)
+  local first, last = 0, height - 1
+  if span.known_gray then
+    first, last = source_rows(height, target, span)
+  end
+  local length = width * (last - first + 1) * 3
+  local position = file:seek("cur", width * first * 3)
+  local rgb = position and file:read(length)
   file:close()
-  if rgb and #rgb == width * height * 3 then
-    return rgb, width, height
+  if rgb and #rgb == length then
+    return rgb, width, height, first
   end
 end
 
-local function grayscale(rgb, pixels)
-  local gray = ffi.new("uint8_t[?]", pixels)
-  -- This loop allocates nothing while reading the string's bytes via FFI.
-  local source = ffi.cast("const uint8_t*", rgb)
-  for i = 0, pixels - 1 do
-    local offset = i * 3
-    local red = source[offset]
-    if red ~= source[offset + 1] or red ~= source[offset + 2] then
-      return
+local function is_gray(pixels, bytes)
+  for offset = 0, bytes - 3, 3 do
+    local red = pixels[offset]
+    if red ~= pixels[offset + 1] or red ~= pixels[offset + 2] then
+      return false
     end
-    gray[i] = red
   end
-  return gray
+  return true
 end
 
-local function samples(from, to, count, offset)
+local function samples(from, to, count, offset, stride)
   local lower = ffi.new("int[?]", count)
   local upper = ffi.new("int[?]", count)
   local fraction = ffi.new("float[?]", count)
   local ratio = from / to
   for x = 0, count - 1 do
-    local at = (x + offset + 0.5) * ratio - 0.5
-    at = math.max(0, math.min(from - 1, at))
-    lower[x] = floor(at)
-    upper[x] = math.min(from - 1, lower[x] + 1)
-    fraction[x] = at - lower[x]
+    local at = sample_at(from, ratio, x + offset)
+    local left = floor(at)
+    lower[x] = left * stride
+    upper[x] = math.min(from - 1, left + 1) * stride
+    fraction[x] = at - left
   end
   return { lower = lower, upper = upper, fraction = fraction }
 end
@@ -100,8 +113,8 @@ end
 
 local function sample_row(image, masks, first, last, y, mask)
   local cols, rows = image.cols, image.rows
-  local row1 = rows.lower[y] * image.source_width
-  local row2 = rows.upper[y] * image.source_width
+  local row1 = (rows.lower[y] - image.source_first) * image.source_width
+  local row2 = (rows.upper[y] - image.source_first) * image.source_width
   local dy = rows.fraction[y]
   local source = image.pixels
   for x = 0, image.width - 1 do
@@ -129,7 +142,7 @@ local function palette()
   return table.concat(colors)
 end
 
-local function scan(image, height)
+local function scan(image, rows)
   local width = image.width
   local masks = ffi.new("uint8_t[?]", width * LEVELS)
   local first = ffi.new("int[?]", LEVELS)
@@ -138,7 +151,7 @@ local function scan(image, height)
     first[gray], last[gray] = width, -1
   end
   local bands, bytes = {}, 0
-  for row = 0, height - 1, 6 do
+  for row = 0, rows - 1, 6 do
     ffi.fill(masks, width * LEVELS)
     for bit = 0, 5 do
       sample_row(image, masks, first, last, row + bit, 2 ^ bit)
@@ -155,35 +168,57 @@ local function scan(image, height)
   return table.concat(bands, "-")
 end
 
-return function(path, width, height, page_width)
-  if width < 1 or height < 6 or height % 6 ~= 0 then
-    return
-  end
-  if width > page_width or width > MAX_EDGE or height > 8192 then
-    return
-  end
-  if width * height > 12 * 1024 * 1024 then
-    return
-  end
-  local rgb, source_width, source_height = read_ppm(path)
+local function prepare(path, width, height, page_width, span)
+  local rgb, source_width, source_height, first = read_ppm(path, height, span)
   if not rgb then
     return
   end
-  local pixels = grayscale(rgb, source_width * source_height)
-  if not pixels then
+  local pixels = ffi.cast("const uint8_t*", rgb)
+  if not span.known_gray and not is_gray(pixels, #rgb) then
     return
   end
-  local image = {
+  return {
+    bytes = rgb, -- Keep the string alive while sampling its bytes via FFI.
     pixels = pixels,
-    source_width = source_width,
+    source_width = source_width * 3,
+    source_first = first,
     width = width,
-    cols = samples(
-      source_width,
-      page_width,
-      width,
-      floor((page_width - width) / 2)
-    ),
-    rows = samples(source_height, height, height, 0),
+    cols = samples(source_width, page_width, width, span.left, 3),
+    rows = samples(source_height, height, span.rows, span.offset, 1),
   }
-  return scan(image, height), palette()
+end
+
+return function(
+  path,
+  width,
+  height,
+  page_width,
+  first_band,
+  last_band,
+  known_gray,
+  left
+)
+  first_band, last_band = first_band or 1, last_band or height / 6
+  if width < 1 or height < 6 or height % 6 ~= 0 then
+    return
+  end
+  if width > page_width or width > MAX_EDGE then
+    return
+  end
+  local span = {
+    offset = (first_band - 1) * 6,
+    rows = (last_band - first_band + 1) * 6,
+    known_gray = known_gray,
+    left = left or floor((page_width - width) / 2),
+  }
+  if span.offset < 0 or span.rows < 6 or span.offset + span.rows > height then
+    return
+  end
+  if width * span.rows > 12 * 1024 * 1024 then
+    return
+  end
+  local image = prepare(path, width, height, page_width, span)
+  if image then
+    return scan(image, span.rows), palette()
+  end
 end

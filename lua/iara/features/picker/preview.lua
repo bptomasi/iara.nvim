@@ -364,9 +364,7 @@ local function show_pdf(self, preview, path)
   local token = self.token
   vim.defer_fn(function()
     if self:is_current(token, preview) then
-      self.pdf_cache = self.pdf_cache or {}
-      self.pdf =
-        require("iara.features.pdf.preview").open(preview, path, self.pdf_cache)
+      self.pdf = require("iara.features.pdf.preview").open(preview, path)
     end
   end, self.moving and M.DEBOUNCE_MS or 0)
 end
@@ -424,10 +422,6 @@ end
 ---deleted. Idempotent.
 function Previewer:close()
   clear_pdf(self)
-  if self.pdf_cache then
-    require("iara.features.pdf.preview").close_cache(self.pdf_cache)
-    self.pdf_cache = nil
-  end
   self.closed = true
   if self.fresh_timer then
     self.fresh_timer:close()

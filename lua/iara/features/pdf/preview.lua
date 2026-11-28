@@ -1,57 +1,10 @@
 --- First-page preview with the same renderer and text fallback as IaraPDF.
 local graphics = require("iara.features.pdf.graphics")
+local cache = require("iara.features.pdf.raster_cache")
 local source = require("iara.features.pdf.source")
 local api = vim.api
 
 local M = {}
-
-local function discard(thumbnail)
-  if thumbnail.image_path then
-    graphics.forget(thumbnail.image_path)
-  end
-  if thumbnail.dir then
-    vim.fn.delete(thumbnail.dir, "rf")
-  end
-end
-
-local function fingerprint(path, size)
-  local info = vim.uv.fs_stat(path)
-  if info then
-    return table.concat({
-      path,
-      size,
-      info.ino,
-      info.size,
-      info.mtime.sec,
-      info.mtime.nsec,
-    }, "\0")
-  end
-end
-
-local function cached(cache, key)
-  for index, entry in ipairs(cache) do
-    if key == entry.key then
-      table.remove(cache, index)
-      cache[#cache + 1] = entry
-      return entry
-    end
-  end
-end
-
-local function remember(state)
-  if state.key and state.cache and state.dir then
-    local cache = state.cache
-    cache[#cache + 1] = {
-      key = state.key,
-      image_path = state.image_path,
-      dir = state.dir,
-    }
-    state.dir, state.retained = nil, true
-    if #cache > 4 then
-      discard(table.remove(cache, 1))
-    end
-  end
-end
 
 local function dimensions(path)
   local file = assert(io.open(path, "rb"))
@@ -110,7 +63,6 @@ local function finish(state, preview, path, image_path)
   end
   if image_path then
     state.image_path = image_path
-    remember(state)
     local ok, picture = pcall(draw, preview, image_path, function()
       if not state.closed and preview.win:valid() then
         state.picture:clear()
@@ -126,26 +78,42 @@ local function finish(state, preview, path, image_path)
   show_text(state, preview, path)
 end
 
-local function raster_size(win, cell)
+local function raster_size(win, cell, format)
   local width = (api.nvim_win_get_width(win) - 2) * cell.cell_width
   local height = (api.nvim_win_get_height(win) - 2) * cell.cell_height
-  return math.max(1, math.min(1800, math.ceil(math.max(width, height))))
+  if format == "ppm" then
+    -- A PPM for the full reading height can also open the document directly.
+    height = math.max(height, (vim.o.lines - 4) * cell.cell_height)
+  end
+  local size = math.ceil(math.max(width, height) / 256) * 256
+  return math.max(1, math.min(format == "ppm" and 2048 or 1800, size))
 end
 
-function M.open(preview, path, cache)
-  local state = { cache = cache }
+local function rendered(state, preview, path, image, bytes)
+  if image and not state.closed then
+    if state.key and state.key == cache.identity(path, state.format) then
+      state.raster =
+        cache.remember(state.key, state.dir, image, state.size, bytes)
+      state.dir = nil
+    end
+  end
+  finish(state, preview, path, image)
+end
+
+function M.open(preview, path)
+  local state = {}
   local available = graphics.available()
   local cell = available and graphics.size()
   if not cell then
     show_text(state, preview, path)
     return state
   end
-  local size = raster_size(preview.win.win, cell)
-  state.key = fingerprint(path, size)
-  local thumbnail = cache and cached(cache, state.key)
-  if thumbnail then
-    state.retained = true
-    finish(state, preview, path, thumbnail.image_path)
+  state.format = graphics.virtual_scroll() and "ppm" or "png"
+  state.size = raster_size(preview.win.win, cell, state.format)
+  state.key = cache.identity(path, state.format)
+  state.raster = cache.acquire(state.key, state.size)
+  if state.raster then
+    finish(state, preview, path, state.raster.path)
     return state
   end
   state.dir = source.directory()
@@ -154,11 +122,11 @@ function M.open(preview, path, cache)
       path,
       1,
       state.dir .. "/preview",
-      size,
-      function(image_path)
-        finish(state, preview, path, image_path)
+      state.size,
+      function(image_path, _, bytes)
+        rendered(state, preview, path, image_path, bytes)
       end,
-      graphics.virtual_scroll() and "ppm" or "png"
+      state.format
     )
   else
     show_text(state, preview, path)
@@ -167,6 +135,9 @@ function M.open(preview, path, cache)
 end
 
 function M.close(state)
+  if state.closed then
+    return
+  end
   state.closed = true
   if state.job then
     state.job:cancel("PDF preview changed")
@@ -174,14 +145,13 @@ function M.close(state)
   if state.picture then
     state.picture:clear()
   end
-  if not state.retained then
-    discard(state)
-  end
-end
-
-function M.close_cache(cache)
-  for _, entry in ipairs(cache) do
-    discard(entry)
+  if state.raster then
+    cache.release(state.raster)
+  elseif state.dir then
+    if state.image_path then
+      graphics.forget(state.image_path)
+    end
+    vim.fn.delete(state.dir, "rf")
   end
 end
 
