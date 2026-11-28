@@ -267,17 +267,27 @@ local function update_cache(view, wanted)
   end
 end
 
+local function publish_batch_page(view, batch, page, raster)
+  if batch.published[page] then
+    return true
+  end
+  local target = raster_prefix(view, page, batch.size) .. "." .. batch.format
+  if not raster or not vim.uv.fs_rename(raster.path, target) then
+    return false
+  end
+  store_page(view, page, batch.size, target, raster.bytes)
+  batch.published[page] = true
+  while batch.published[batch.next] do
+    batch.next = batch.next + 1
+  end
+  return true
+end
+
 local function batch_result(view, batch, pages)
   view.job, view.batch = nil, nil
   if not view.closed and view.graphical and not batch.cancelled then
     for page = batch.first, batch.last do
-      local raster = pages[page]
-      local target = raster_prefix(view, page, batch.size)
-        .. "."
-        .. batch.format
-      if raster and vim.uv.fs_rename(raster.path, target) then
-        store_page(view, page, batch.size, target, raster.bytes)
-      else
+      if not publish_batch_page(view, batch, page, pages[page]) then
         view.prefetch_failed[page] = batch.size
       end
     end
@@ -298,9 +308,18 @@ local function start_batch(view, first, last, size)
     dir = dir,
     first = first,
     last = last,
+    next = first,
+    published = {},
     size = size,
     format = raster_format(view),
   }
+  local function on_page(page, raster)
+    if not view.closed and view.graphical and not batch.cancelled then
+      if publish_batch_page(view, batch, page, raster) then
+        enqueue(view)
+      end
+    end
+  end
   view.batch = batch
   view.job = source.batch(
     view.path,
@@ -311,7 +330,8 @@ local function start_batch(view, first, last, size)
     batch.format,
     function(pages)
       batch_result(view, batch, pages)
-    end
+    end,
+    view.virtual and on_page or nil
   )
 end
 
@@ -325,10 +345,13 @@ local function first_idle_page(view, queue, visible_count)
   end
 end
 
-local function prefetch(view, queue, wanted, visible_count)
-  local first, size = first_idle_page(view, queue, visible_count)
-  if not first then
-    return
+local function scroll_delay(view)
+  return view.scrolled_at and 120 - (vim.uv.now() - view.scrolled_at) or 0
+end
+
+local function wait_for_prefetch(view, first)
+  if scroll_delay(view) > 0 then
+    return false
   end
   local delay = view.virtual and 32 or 100
   if view.prefetch_first ~= first then
@@ -336,9 +359,14 @@ local function prefetch(view, queue, wanted, visible_count)
     vim.defer_fn(function()
       enqueue(view)
     end, delay + 2)
-    return
+    return true
   end
-  if vim.uv.now() - view.prefetch_at < delay then
+  return vim.uv.now() - view.prefetch_at < delay
+end
+
+local function prefetch(view, queue, wanted, visible_count)
+  local first, size = first_idle_page(view, queue, visible_count)
+  if not first or wait_for_prefetch(view, first) then
     return
   end
 
@@ -369,30 +397,51 @@ local function urgent_raster(view, queue, visible_count)
   end
 end
 
+local function defer_sharpening(view)
+  local remaining = scroll_delay(view)
+  if remaining <= 0 then
+    return false
+  end
+  if not view.sharpen_pending then
+    view.sharpen_pending = true
+    vim.defer_fn(function()
+      view.sharpen_pending = false
+      enqueue(view)
+    end, remaining)
+  end
+  return true
+end
+
 local function cancel_raster(view, wanted, urgent)
   if view.batch then
     local batch = view.batch
-    if urgent or view.zoom_at or not wanted[batch.first] then
+    local working = view.virtual and batch.next or nil
+    local obsolete = batch.next <= batch.last and not wanted[batch.next]
+    -- A streamed batch already working on the visible page can deliver it
+    -- directly. A jump to a later page still takes priority over the batch.
+    if (urgent and urgent ~= working) or view.zoom_at or obsolete then
       batch.cancelled = true
       view.job:cancel("PDF viewport moved")
     end
-  elseif (urgent and urgent ~= view.loading) or not wanted[view.loading] then
+  elseif
+    (urgent and urgent ~= view.loading)
+    or not wanted[view.loading]
+    or (view.rasters[view.loading] and scroll_delay(view) > 0)
+  then
     view.job:cancel("PDF viewport moved")
   end
 end
 
-local function request_pages(view, queue, wanted, visible_count)
-  update_cache(view, wanted)
-  local urgent = urgent_raster(view, queue, visible_count)
-  if view.job then
-    return cancel_raster(view, wanted, urgent)
+local function warm_next(view, page)
+  local next_raster = view.rasters[page]
+  local slot = view.slots[page]
+  if next_raster and next_raster.warmed ~= slot then
+    next_raster.warmed = slot
+    graphics.warm(next_raster.path, slot)
   end
-  if urgent then
-    return load_page(view, urgent)
-  end
-  if view.zoom_at then
-    return
-  end
+end
+
+local function sharpen_page(view, queue, visible_count)
   for index = 1, visible_count do
     local page = queue[index]
     local entry = view.rasters[page]
@@ -402,15 +451,32 @@ local function request_pages(view, queue, wanted, visible_count)
       and size ~= entry.failed_size
       and graphics.ready(entry.path, view.slots[page])
     then
-      return load_page(view, page)
+      if not defer_sharpening(view) then
+        return page
+      end
+      return
     end
   end
-  local next_page = queue[visible_count + 1]
-  local next_raster = view.rasters[next_page]
-  local slot = view.slots[next_page]
-  if next_raster and next_raster.warmed ~= slot then
-    next_raster.warmed = slot
-    graphics.warm(next_raster.path, slot)
+end
+
+local function request_pages(view, queue, wanted, visible_count)
+  update_cache(view, wanted)
+  local urgent = urgent_raster(view, queue, visible_count)
+  if not urgent and not view.zoom_at then
+    warm_next(view, queue[visible_count + 1])
+  end
+  if view.job then
+    return cancel_raster(view, wanted, urgent)
+  end
+  if urgent then
+    return load_page(view, urgent)
+  end
+  if view.zoom_at then
+    return
+  end
+  local sharpen = sharpen_page(view, queue, visible_count)
+  if sharpen then
+    return load_page(view, sharpen)
   end
   prefetch(view, queue, wanted, visible_count)
 end
@@ -800,6 +866,7 @@ local function scroll_virtual(view, win, rows)
   local target = math.max(1, math.min(top + rows, limit))
   if target ~= top then
     view.tops[win] = target
+    view.scrolled_at = vim.uv.now()
     enqueue(view, true)
   end
 end
@@ -1103,9 +1170,13 @@ local function window_options(win)
   options.foldenable = false
   options.statuscolumn = ""
   options.cursorline = false
+  options.list = false
   options.wrap = false
   options.scrolloff = 0
   options.sidescrolloff = 0
+  api.nvim_win_call(win, function()
+    vim.opt_local.fillchars:append({ eob = " " })
+  end)
 end
 
 local function prepare_windows(view)

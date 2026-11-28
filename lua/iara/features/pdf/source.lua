@@ -9,6 +9,7 @@ local function run(path, argv, options, callback)
     env = { LC_ALL = "C" },
     timeout_ms = options.timeout,
     stdout = options.stdout,
+    stderr = options.stderr,
     on_complete = function(result)
       if result.status == "exited" and result.code == 0 then
         callback(result.stdout or "")
@@ -69,13 +70,16 @@ function M.directory()
   return vim.uv.fs_mkdtemp(vim.fn.tempname() .. "-pdf-XXXXXX")
 end
 
-local function raster_command(path, first, last, prefix, size, format)
+local function raster_command(path, first, last, prefix, size, format, progress)
   local argv = { "pdftoppm", "-f", tostring(first), "-l", tostring(last) }
   if format ~= "ppm" then
     argv[#argv + 1] = "-png"
   end
   if first == last then
     argv[#argv + 1] = "-singlefile"
+  end
+  if progress then
+    argv[#argv + 1] = "-progress"
   end
   return vim.list_extend(argv, { "-scale-to", tostring(size), path, prefix })
 end
@@ -95,6 +99,13 @@ function M.raster(path, page, prefix, size, callback, format)
   end)
 end
 
+local function batch_page(path)
+  local stat = vim.uv.fs_stat(path)
+  if stat and stat.type == "file" then
+    return { path = path, bytes = stat.size }
+  end
+end
+
 local function batch_files(dir, first, last, format)
   local pages = {}
   local files = vim.uv.fs_scandir(dir)
@@ -108,20 +119,49 @@ local function batch_files(dir, first, last, format)
     end
     local page = tonumber(name:match("^page%-(%d+)%." .. format .. "$"))
     if page and page >= first and page <= last then
-      local file = dir .. "/" .. name
-      local stat = vim.uv.fs_stat(file)
-      if stat then
-        pages[page] = { path = file, bytes = stat.size }
-      end
+      pages[page] = batch_page(dir .. "/" .. name)
     end
   end
   return pages
 end
 
+local function progress_stream(dir, first, last, format, on_page)
+  local prefix = dir .. "/"
+  local name = "^page%-(%d+)%." .. format .. "$"
+  local function publish(line)
+    -- Poppler prints the output path on stderr after closing the page file.
+    local number, file = line:match("^(%d+)%s+%d+%s+(.+)$")
+    local page = tonumber(number)
+    if not page or page < first or page > last then
+      return
+    end
+    if vim.startswith(file, prefix) then
+      local index = tonumber(file:sub(#prefix + 1):match(name))
+      local raster = index == page and batch_page(file)
+      if raster then
+        on_page(page, raster)
+      end
+    end
+  end
+  return {
+    mode = "lines",
+    on_data = function(lines)
+      for _, line in ipairs(lines) do
+        publish(line)
+      end
+    end,
+  }
+end
+
 ---Read only the numbered outputs from this job's own temporary directory.
-function M.batch(path, first, last, dir, size, format, callback)
-  local argv = raster_command(path, first, last, dir .. "/page", size, format)
-  return run(path, argv, raster_options, function(output)
+function M.batch(path, first, last, dir, size, format, callback, on_page)
+  local argv =
+    raster_command(path, first, last, dir .. "/page", size, format, on_page)
+  local options = vim.tbl_extend("force", {}, raster_options)
+  if on_page then
+    options.stderr = progress_stream(dir, first, last, format, on_page)
+  end
+  return run(path, argv, options, function(output)
     callback(output and batch_files(dir, first, last, format) or {})
   end)
 end

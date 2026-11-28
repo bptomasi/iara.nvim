@@ -2,6 +2,7 @@
 --- scrolling only repaints page pixels and clears exposed blank cells.
 local cache = require("iara.features.pdf.sixel_cache")
 local data = require("iara.features.pdf.sixel_data")
+local scroll = require("iara.features.pdf.sixel_scroll")
 local api = vim.api
 
 local M = {}
@@ -65,7 +66,7 @@ local function area(win, buf)
   }
 end
 
-local function preview_covered(win, slice)
+local function covered(win, slice)
   local layer = api.nvim_win_get_config(win).zindex or 0
   for _, other in ipairs(api.nvim_tabpage_list_wins(0)) do
     local config = api.nvim_win_get_config(other)
@@ -86,37 +87,25 @@ local function preview_covered(win, slice)
   return false
 end
 
-local function slice_cells(picture, skip, height)
+local function slice_cells(picture, first, last)
   local cached = picture.slice
   local raster = picture.entry.raster
-  if not raster then
-    return
-  end
   if
     cached
     and cached.raster == raster
-    and cached.skip == skip
-    and cached.height == height
+    and cached.first == first
+    and cached.last == last
   then
-    return cached.graphic, cached.painted
+    return cached
   end
-  local graphic, painted = data.slice(raster, skip, height)
-  if not graphic then
-    return
-  end
-  picture.slice = {
-    raster = raster,
-    skip = skip,
-    height = height,
-    graphic = graphic,
-    painted = painted,
-  }
-  return graphic, painted
+  picture.slice = data.capture(raster, first, last)
+  return picture.slice
 end
 
 local function placement(picture, region)
   local rect = picture.rect
   local topline = rect.topline and rect.topline() or region.topline
+  region.document = rect.topline and topline
   local y = rect.preview and rect.y or rect.y + 2 - topline
   local first = math.max(0, y)
   local available = region.height - (region.bar and 1 or 0)
@@ -156,7 +145,7 @@ local function collect_picture(picture, region, focused)
     return true
   end
   local preview = picture.rect.preview
-  if preview and preview_covered(picture.win, slice) then
+  if preview and covered(picture.win, slice) then
     cache.drop(entry, picture)
     return false
   end
@@ -167,9 +156,10 @@ local function collect_picture(picture, region, focused)
     return true
   end
   cache.want(entry, picture, first, last, focused == picture.win)
-  local graphic, painted = slice_cells(picture, slice.skip, slice.height)
-  if graphic then
-    slice.graphic, slice.rows = graphic, math.ceil(painted / slice.cell)
+  local frame = slice_cells(picture, first, last)
+  if frame then
+    slice.frame = frame
+    slice.rows = math.ceil((last - first + 1) * 6 / slice.cell)
     region.slices[#region.slices + 1] = slice
     region.preview = preview
   elseif entry.failed then
@@ -204,7 +194,11 @@ local function collect()
   return regions
 end
 
-local function paint_region(out, region, old)
+local function paint_region(out, region, old, strips)
+  if strips then
+    out[#out + 1] = strips
+    return
+  end
   -- Foot removes the old Sixel cells here, including short edge bands.
   -- Erase and paint are sent in the same synchronized terminal update.
   for _, slice in ipairs(old and old.slices or {}) do
@@ -216,7 +210,9 @@ local function paint_region(out, region, old)
     )
   end
   for _, slice in ipairs(region.slices) do
-    out[#out + 1] = move(slice.row, slice.col) .. slice.graphic
+    local frame = slice.frame
+    frame.graphic = frame.graphic or data.pack(frame, frame.first, frame.last)
+    out[#out + 1] = move(slice.row, slice.col) .. frame.graphic
   end
 end
 
@@ -299,7 +295,7 @@ local function same_slices(before, after)
     if
       old.row ~= current.row
       or old.col ~= current.col
-      or old.graphic ~= current.graphic
+      or old.frame ~= current.frame
     then
       return false
     end
@@ -311,11 +307,34 @@ local function keep_previous_frame(region, before)
   -- Replacing only the ready slices can expose an unrendered page as a
   -- black rectangle. Keep the whole previous frame until every slice fits.
   if region.waiting and before and not before.preview then
+    region.document = before.document
     region.slices = before.slices
   end
 end
 
-local function update_region(out, region, before, repair)
+local function scroll_pages(win, before, region)
+  if
+    not before
+    or not region.document
+    or before.document == region.document
+    or region.col ~= 1
+    or region.width ~= vim.o.columns
+    or vim.fn.pumvisible() == 1
+  then
+    return
+  end
+  local viewport = {
+    row = region.row,
+    col = region.col,
+    rows = region.height,
+    cols = region.width,
+  }
+  if not covered(win, viewport) then
+    return scroll.update(before, region)
+  end
+end
+
+local function update_region(out, win, region, before, repair)
   keep_previous_frame(region, before)
   local same = same_slices(before, region)
   local repaint = repair or not same
@@ -326,7 +345,13 @@ local function update_region(out, region, before, repair)
   end
   if repaint then
     -- Erase the damaged preview and repaint it in the same terminal update.
-    paint_region(out, region, (not same or region.preview) and before or nil)
+    local strips = not repair and scroll_pages(win, before, region)
+    paint_region(
+      out,
+      region,
+      (not same or region.preview) and before or nil,
+      strips
+    )
   end
   if region.bar and (repaint or bar_changed) then
     paint_scrollbar(out, region)
@@ -337,7 +362,7 @@ end
 local function collect_updates(regions, old, damaged)
   local out, flush = {}, false
   for win, region in pairs(regions) do
-    flush = update_region(out, region, old[win], damaged[win]) or flush
+    flush = update_region(out, win, region, old[win], damaged[win]) or flush
   end
   return out, flush
 end

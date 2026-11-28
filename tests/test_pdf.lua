@@ -111,7 +111,12 @@ local function mock_poppler()
 format=ppm
 if [ "$5" = "-png" ]; then format=png; fi
 prefix=
-for arg do path=$prefix; prefix=$arg; done
+progress=no
+for arg do
+  path=$prefix
+  prefix=$arg
+  if [ "$arg" = -progress ]; then progress=yes; fi
+done
 test "$path" = "$IARA_TEST_PDF"
 printf '%s %s\n' "$2" "$4" >>"$(dirname "$path")/renders.log"
 if [ "$2" = "$4" ]; then
@@ -119,7 +124,17 @@ if [ "$2" = "$4" ]; then
 else
   if [ "${IARA_TEST_PDF_SLOW_BATCH:-}" = yes ]; then sleep 5; fi
   for page in $(seq "$2" "$4"); do
-    printf '%s' "$page" >"$prefix-$page.$format"
+    if [ "${IARA_TEST_PDF_STREAM_BATCH:-}" = yes ]; then
+      for attempt in $(seq 1 200); do
+        if [ -f "$(dirname "$path")/release-$page" ]; then break; fi
+        sleep .02
+      done
+    fi
+    target="$prefix-$page.$format"
+    printf '%s' "$page" >"$target"
+    if [ "$progress" = yes ]; then
+      printf '%s %s %s\n' "$page" "$4" "$target" >&2
+    fi
   done
 fi
 ]]
@@ -227,6 +242,36 @@ graphical["a visible page supersedes a running Poppler batch"] = function()
     end
   end)
   eq(vim.fn.readfile(renders)[3], "2 2")
+end
+
+graphical["Foot uses the next page before the batch finishes"] = function()
+  child.lua([[
+    vim.env.IARA_TEST_PDF_STREAM_BATCH = "yes"
+    require("iara.features.pdf.graphics").virtual_scroll = function()
+      return true
+    end
+  ]])
+  open()
+  local dir = vim.fs.dirname(file)
+  local renders = dir .. "/renders.log"
+  eq(
+    vim.wait(3000, function()
+      return vim.fn.filereadable(renders) == 1 and #vim.fn.readfile(renders) > 1
+    end, 20),
+    true
+  )
+  child.type_keys("]p")
+  helpers.write_file(dir .. "/release-2", "ready")
+  wait_drawings(function(items)
+    for _, item in ipairs(items) do
+      if vim.fs.basename(item.path):match("^page%-2%-") then
+        return true
+      end
+    end
+  end)
+  eq(vim.fn.readfile(renders), { "1 1", "2 3" })
+  eq(child.lua_get("vim.w.iara_pdf_page"), " 2/3 ")
+  helpers.write_file(dir .. "/release-3", "ready")
 end
 
 graphical["scrolls across pages and reuses rasters"] = function()
@@ -629,6 +674,90 @@ T["Sixel encodes gray PPM and sends color to the converter"] = function()
   eq(child.lua_get("_G.color.raster.palette"), "#0;2;100;0;0")
 end
 
+local function mock_scroll_compositor(cell_height)
+  child.lua(
+    [[
+    local cell_height = ...
+    local api = vim.api
+    local raster = { width = 40, height = 720, palette = "#0;2;100;100;100",
+      bands = vim.split(("#0!40~ "):rep(120), " ", { trimempty = true }) }
+    package.loaded["iara.features.pdf.sixel_cache"] = {
+      want = function() end, drop = function() end,
+      hold = function() end, release = function() end,
+      prepare = function()
+        return { height = raster.height, raster = raster }
+      end,
+    }
+    package.loaded["image/utils/term"] = {
+      get_size = function()
+        return { cell_width = 10, cell_height = cell_height }
+      end,
+    }
+    api.nvim_set_decoration_provider = function() end
+    api.nvim_ui_send = function(bytes) _G.last_frame = bytes end
+    local sixel = require("iara.features.pdf.sixel")
+    local top = 2
+    _G.shift_pdf = function(delta)
+      top = top + delta
+      sixel.refresh()
+    end
+    local win = api.nvim_get_current_win()
+    vim.wo[win].number = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].signcolumn = "no"
+    vim.wo[win].foldcolumn = "0"
+    sixel.picture("fake", win, api.nvim_get_current_buf(), {
+      x = 1, y = 0, width = 4, height = 40,
+      topline = function() return top end,
+    })
+  ]],
+    { cell_height or 18 }
+  )
+end
+
+local function sent(fragment)
+  return child.lua(
+    "local text = ...; return _G.last_frame:find(text, 1, true) ~= nil",
+    { fragment }
+  )
+end
+
+T["Sixel sends only the edge when the old rows match"] = function()
+  mock_scroll_compositor()
+  child.lua("_G.shift_pdf(2)")
+  eq(sent("\27[2S\27[r"), true)
+  eq(sent('q"1;1;40;54'), true)
+  child.lua("_G.shift_pdf(-2)")
+  eq(sent("\27[2T\27[r"), true)
+  eq(sent('q"1;1;40;36'), true)
+end
+
+T["Sixel redraws fully when text rows and bands do not align"] = function()
+  mock_scroll_compositor(19)
+  child.lua("_G.shift_pdf(2)")
+  eq(sent("\27[2S\27[r"), false)
+  child.lua("_G.shift_pdf(6)")
+  eq(sent("\27[6S\27[r"), true)
+end
+
+T["Sixel leaves overlays and side-by-side splits in place"] = function()
+  mock_scroll_compositor()
+  child.lua([[
+    _G.float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true),
+      false, { relative = "editor", row = 1, col = 1, width = 5, height = 3,
+        focusable = false })
+    _G.shift_pdf(2)
+  ]])
+  eq(sent("\27[2S\27[r"), false)
+  child.lua([[
+    vim.api.nvim_win_close(_G.float, true)
+    vim.cmd.vsplit()
+    _G.shift_pdf(2)
+  ]])
+  eq(sent("\27[2S\27[r"), false)
+  eq(sent("\27P0;1;0q"), true)
+end
+
 T["Sixel enlarges the page and encodes only the center columns"] = function()
   local path = file .. ".ppm"
   local ppm = assert(io.open(path, "wb"))
@@ -690,14 +819,18 @@ T["Sixel slices retain colors and stay within viewport"] = function()
     .. "#1!8~-!8~#0$!8?-#1!8~-!8~\27\\"
   local raster = assert(data.decode(encoded))
   eq(raster.width, 8)
-  local slice, height = data.slice(raster, 7, 13)
+  local first, last = data.bounds(raster.height, 7, 13)
+  local frame = assert(data.capture(raster, first, last))
+  local slice, height = data.pack(frame, first, last)
   eq(height, 12)
   eq(
     slice,
     '\27P0;1;0q"1;1;8;12#0;2;0;0;0#1;2;100;100;100'
       .. "#1!8~#0$!8?-#0#1!8~\27\\"
   )
-  eq(data.slice(raster, 0, 5), nil)
+  eq(data.bounds(raster.height, 0, 5), nil)
+  raster.bands[2] = nil
+  eq((data.pack(frame, 2, 3)), slice)
 end
 
 return T

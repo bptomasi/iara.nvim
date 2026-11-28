@@ -40,22 +40,31 @@ function M.bounds(page_height, skip, height)
   end
 end
 
-function M.slice(raster, skip, height)
-  local first, last = M.bounds(raster.height, skip, height)
-  if not first then
+---Pin the bands of a frame. The cache can evict them while this frame is
+---still on screen and may need repainting.
+function M.capture(raster, first, last)
+  if not raster then
     return
   end
+  local bands = {}
   for band = first, last do
-    if not raster.bands[band] then
+    local bytes = raster.bands[band]
+    if not bytes then
       return
     end
+    bands[#bands + 1] = bytes
   end
+  return { raster = raster, first = first, last = last, bands = bands }
+end
+
+function M.pack(frame, first, last)
   local pixels = (last - first + 1) * 6
+  local offset = 1 - frame.first
   return ('\27P0;1;0q"1;1;%d;%d%s%s\27\\'):format(
-    raster.width,
+    frame.raster.width,
     pixels,
-    raster.palette,
-    table.concat(raster.bands, "-", first, last)
+    frame.raster.palette,
+    table.concat(frame.bands, "-", first + offset, last + offset)
   ),
     pixels
 end
