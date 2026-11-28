@@ -11,7 +11,58 @@ local function at_row(slices, row)
 end
 
 local function pixel_row(slice, row)
-  return (slice.frame.first - 1) * 6 + (row - slice.row) * slice.cell
+  local source = slice.source or (slice.frame.first - 1) * 6
+  return source + (row - slice.row) * slice.cell
+end
+
+local function pixel_limit(slice)
+  return slice.limit or slice.frame.last * 6
+end
+
+local function same_raster(old, new)
+  return old
+    and old.frame.raster == new.frame.raster
+    and old.cell == new.cell
+    and old.cell % 1 == 0
+    and old.col == new.col
+    and old.cols == new.cols
+end
+
+local function continue_slice(slice, old, row, delta)
+  if not same_raster(old, slice) then
+    return slice
+  end
+  local inset = (row - slice.row) * slice.cell
+  local source = pixel_row(old, row + delta) - inset
+  local skip = slice.skip
+  if
+    old.skip + (row + delta - old.row) * old.cell - inset ~= skip
+    or source < 0
+    or source > skip
+    or source < skip - 5
+  then
+    return slice
+  end
+  -- Keep the pixel offset of the retained rows, including partial bands.
+  local limit = math.min(slice.frame.raster.height, source + slice.height)
+  if source == pixel_row(slice, slice.row) and limit == pixel_limit(slice) then
+    return slice
+  end
+  return vim.tbl_extend("force", {}, slice, {
+    source = source,
+    limit = limit,
+    rows = math.ceil((limit - source) / slice.cell),
+  })
+end
+
+local function continued_slices(before, after, first, delta)
+  local slices = {}
+  for index, slice in ipairs(after) do
+    local row = math.max(first, slice.row)
+    local old = row < slice.row + slice.rows and at_row(before, row + delta)
+    slices[index] = continue_slice(slice, old, row, delta)
+  end
+  return slices
 end
 
 local function same_row(old, new, row, delta)
@@ -20,21 +71,17 @@ local function same_row(old, new, row, delta)
   end
   local source = pixel_row(old, row + delta)
   local target = pixel_row(new, row)
-  return old.frame.raster == new.frame.raster
-    and old.cell == new.cell
-    and old.cell % 1 == 0
-    and old.col == new.col
-    and old.cols == new.cols
+  return same_raster(old, new)
     and source == target
-    and math.min(old.cell, old.frame.last * 6 - source)
-      == math.min(new.cell, new.frame.last * 6 - target)
+    and math.min(old.cell, pixel_limit(old) - source)
+      == math.min(new.cell, pixel_limit(new) - target)
 end
 
 local function matching_rows(before, after, first, last, delta)
   local overlap = false
   for row = first, last do
-    local old = at_row(before.slices, row + delta)
-    local new = at_row(after.slices, row)
+    local old = at_row(before, row + delta)
+    local new = at_row(after, row)
     if not same_row(old, new, row, delta) then
       return false
     end
@@ -47,30 +94,75 @@ local function edge(slice, first, last)
   local bottom = slice.row + slice.rows - 1
   local start, finish = math.max(slice.row, first), math.min(bottom, last)
   if start > finish then
-    return
-  end
-  -- Overdraw adjacent rows as needed to start and end on a band boundary.
-  while (start - slice.row) * slice.cell % 6 ~= 0 do
-    start = start - 1
-  end
-  while finish < bottom and (finish - start + 1) * slice.cell % 6 ~= 0 do
-    finish = finish + 1
+    return ""
   end
   local skip = pixel_row(slice, start)
-  local height = (finish - start + 1) * slice.cell
-  local low, high = data.bounds(slice.frame.last * 6, skip, height)
-  if low then
-    return ("\27[%d;%dH"):format(start, slice.col)
-      .. data.pack(slice.frame, low, high)
+  local height =
+    math.min((finish - start + 1) * slice.cell, pixel_limit(slice) - skip)
+  local graphic = data.pack_rows(slice.frame, skip, height)
+  if graphic then
+    return ("\27[%d;%dH"):format(start, slice.col) .. graphic
   end
 end
 
-local function exposed(out, frame, first, last)
-  for _, slice in ipairs(frame.slices) do
+local function exposed(out, slices, first, last)
+  for _, slice in ipairs(slices) do
     local draw = edge(slice, first, last)
-    if draw then
-      out[#out + 1] = draw
+    if not draw then
+      return false
     end
+    out[#out + 1] = draw
+  end
+  return true
+end
+
+local function erase_rows(first, last, width)
+  return ("\27[%d;1;%d;%d$z"):format(first, last, width)
+end
+
+local function scroll_rows(viewport)
+  local top, bottom, delta = viewport.top, viewport.bottom, viewport.delta
+  local first, last = top, top + delta - 1
+  if delta < 0 then
+    first, last = bottom + delta + 1, bottom
+  end
+  -- Cut off outgoing parts of Sixel images before the terminal recycles
+  -- those rows. Foot can otherwise drop the whole image, including its tail.
+  return erase_rows(first, last, viewport.width)
+    .. ("\27[%d;%dr\27[%d%s\27[r"):format(
+      top,
+      bottom,
+      math.abs(delta),
+      delta > 0 and "S" or "T"
+    )
+end
+
+local function redraw_edges(out, slices, viewport)
+  local top, bottom, delta = viewport.top, viewport.bottom, viewport.delta
+  if delta < 0 and not exposed(out, slices, top, top - delta - 1) then
+    return false
+  end
+  local seam = bottom - math.max(0, delta)
+  if viewport.tail_dirty then
+    out[#out + 1] = erase_rows(seam, seam, viewport.width)
+  else
+    seam = seam + 1
+  end
+  return exposed(out, slices, seam, bottom)
+end
+
+local function retain_rows(before, after, viewport)
+  local delta = viewport.delta
+  local first = viewport.top - math.min(0, delta)
+  local last = viewport.bottom - math.max(0, delta)
+  local slices = continued_slices(before, after, first, delta)
+  local old, new = at_row(before, last + delta), at_row(slices, last)
+  viewport.tail_dirty = not same_row(old, new, last, delta)
+  if viewport.tail_dirty then
+    last = last - 1
+  end
+  if matching_rows(before, slices, first, last, delta) then
+    return slices
   end
 end
 
@@ -86,28 +178,20 @@ function M.update(before, after)
   local delta = after.document - before.document
   local top = after.row
   local bottom = top + after.height - (after.bar and 2 or 1)
-  -- Repaint the last old row when scrolling down. It may have been
-  -- truncated to a partial cell and will now sit above the new pixels.
-  local first = top - math.min(0, delta)
-  local last = bottom - math.max(0, delta + 1)
-  if delta == 0 or not matching_rows(before, after, first, last, delta) then
+  if delta == 0 or math.abs(delta) > bottom - top then
     return
   end
-  local out = {
-    ("\27[%d;%dr\27[%d%s\27[r"):format(
-      top,
-      bottom,
-      math.abs(delta),
-      delta > 0 and "S" or "T"
-    ),
-  }
-  if delta > 0 then
-    local seam = last + 1
-    out[#out + 1] = ("\27[%d;1;%d;%d$z"):format(seam, seam, after.width)
-    exposed(out, after, seam, bottom)
-  else
-    exposed(out, after, top, first - 1)
+  local viewport =
+    { top = top, bottom = bottom, delta = delta, width = after.width }
+  local slices = retain_rows(before.slices, after.slices, viewport)
+  if not slices then
+    return
   end
+  local out = { scroll_rows(viewport) }
+  if not redraw_edges(out, slices, viewport) then
+    return
+  end
+  after.slices = slices
   return table.concat(out)
 end
 

@@ -211,6 +211,10 @@ local function paint_region(out, region, old, strips)
   end
   for _, slice in ipairs(region.slices) do
     local frame = slice.frame
+    if slice.source then
+      slice.source, slice.limit = nil, nil
+      slice.rows = math.ceil((frame.last - frame.first + 1) * 6 / slice.cell)
+    end
     frame.graphic = frame.graphic or data.pack(frame, frame.first, frame.last)
     out[#out + 1] = move(slice.row, slice.col) .. frame.graphic
   end
@@ -334,6 +338,17 @@ local function scroll_pages(win, before, region)
   end
 end
 
+local function stale_region(before, same, preview)
+  if not same or preview then
+    return before
+  end
+  for _, slice in ipairs(before.slices) do
+    if slice.source then
+      return before
+    end
+  end
+end
+
 local function update_region(out, win, region, before, repair)
   keep_previous_frame(region, before)
   local same = same_slices(before, region)
@@ -349,9 +364,12 @@ local function update_region(out, win, region, before, repair)
     paint_region(
       out,
       region,
-      (not same or region.preview) and before or nil,
+      stale_region(before, same, region.preview),
       strips
     )
+  else
+    -- Keep the actual pixel offset of the image already on the terminal.
+    region.slices = before.slices
   end
   if region.bar and (repaint or bar_changed) then
     paint_scrollbar(out, region)

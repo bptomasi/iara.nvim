@@ -698,7 +698,7 @@ local function mock_scroll_compositor(cell_height)
     local sixel = require("iara.features.pdf.sixel")
     local top = 2
     _G.shift_pdf = function(delta)
-      top = top + delta
+      top, _G.last_frame = top + delta, ""
       sixel.refresh()
     end
     local win = api.nvim_get_current_win()
@@ -725,19 +725,46 @@ end
 T["Sixel sends only the edge when the old rows match"] = function()
   mock_scroll_compositor()
   child.lua("_G.shift_pdf(2)")
-  eq(sent("\27[2S\27[r"), true)
-  eq(sent('q"1;1;40;54'), true)
+  local height = child.api.nvim_win_get_height(0)
+  local erase = ("\27[1;1;2;%d$z"):format(child.o.columns)
+  eq(sent(erase .. ("\27[1;%dr\27[2S\27[r"):format(height)), true)
+  eq(sent('q"1;1;40;36'), true)
   child.lua("_G.shift_pdf(-2)")
   eq(sent("\27[2T\27[r"), true)
   eq(sent('q"1;1;40;36'), true)
 end
 
-T["Sixel redraws fully when text rows and bands do not align"] = function()
-  mock_scroll_compositor(19)
-  child.lua("_G.shift_pdf(2)")
-  eq(sent("\27[2S\27[r"), false)
-  child.lua("_G.shift_pdf(6)")
-  eq(sent("\27[6S\27[r"), true)
+T["Sixel reuses pixels on repeated one-row scrolls at 31 px"] = function()
+  mock_scroll_compositor(31)
+  for _ = 1, 8 do
+    child.lua("_G.shift_pdf(1)")
+    eq(sent("\27[1S\27[r"), true)
+    child.lua("_G.shift_pdf(0)")
+  end
+  child.lua("_G.shift_pdf(-1)")
+  eq(sent("\27[1T\27[r"), true)
+  eq(sent("\27P0;1;0q"), true)
+end
+
+T["Sixel repacks exact rows across a color band boundary"] = function()
+  local data = require("iara.features.pdf.sixel_data")
+  local raster = {
+    width = 2,
+    height = 12,
+    palette = "#1;2;100;0;0#2;2;0;0;100",
+    bands = { "#1!2~", "#2!2~" },
+  }
+  local frame = assert(data.capture(raster, 1, 2))
+  eq(
+    data.pack_rows(frame, 4, 5),
+    '\27P0;1;0q"1;1;2;5#1;2;100;0;0#2;2;0;0;100#1!2B$#2!2[\27\\'
+  )
+  eq(
+    data.pack_rows(frame, 0, 2),
+    '\27P0;1;0q"1;1;2;2#1;2;100;0;0#2;2;0;0;100#1!2B\27\\'
+  )
+  eq(data.pack_rows(frame, 0, 12), (data.pack(frame, 1, 2)))
+  eq(data.pack_rows(frame, 9, 4), nil)
 end
 
 T["Sixel leaves overlays and side-by-side splits in place"] = function()
